@@ -50,6 +50,8 @@ interface SalesViewProps {
   getProductCostBreakdown: (p: ProductItem) => any;
   getComboCostBreakdown: (c: ComboItem) => any;
   salesChannels?: string[];
+  channelFilter?: string;
+  onChannelFilterChange?: (channel: string) => void;
   onOpenManageChannels?: () => void;
 }
 
@@ -67,11 +69,22 @@ export const SalesView: React.FC<SalesViewProps> = ({
   getProductCostBreakdown,
   getComboCostBreakdown,
   salesChannels = DEFAULT_SALES_CHANNELS,
+  channelFilter: channelFilterProp,
+  onChannelFilterChange,
   onOpenManageChannels
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [channelFilter, setChannelFilter] = useState<string>('all');
+  const [localChannelFilter, setLocalChannelFilter] = useState<string>('all');
   const [saleToDelete, setSaleToDelete] = useState<SaleRecord | null>(null);
+
+  const channelFilter = channelFilterProp !== undefined ? channelFilterProp : localChannelFilter;
+
+  const handleSetChannelFilter = (ch: string) => {
+    setLocalChannelFilter(ch);
+    if (onChannelFilterChange) {
+      onChannelFilterChange(ch);
+    }
+  };
 
   const displaySales = filteredSales.filter(s => {
     if (channelFilter !== 'all' && (s.channel || 'Direct') !== channelFilter) {
@@ -130,6 +143,11 @@ export const SalesView: React.FC<SalesViewProps> = ({
             >
               <Tag className="w-4 h-4 text-pink-600" />
               <span>Channels</span>
+              {salesChannels && salesChannels.length > 0 && (
+                <span className="text-[10px] font-bold px-1.5 py-0.2 rounded-full bg-pink-100 text-pink-700">
+                  {salesChannels.length}
+                </span>
+              )}
             </button>
           )}
           {onOpenExportReport && (
@@ -189,6 +207,72 @@ export const SalesView: React.FC<SalesViewProps> = ({
       )}
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+        {/* Interactive Channel Filter Pills Bar */}
+        {salesChannels && salesChannels.length > 0 && (
+          <div className="bg-slate-50/70 border-b border-slate-100 px-4 py-2.5 flex items-center justify-between gap-3 overflow-x-auto">
+            <div className="flex items-center gap-1.5 flex-nowrap shrink-0">
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mr-1 flex items-center gap-1">
+                <Tag className="w-3.5 h-3.5 text-pink-500" /> Channel:
+              </span>
+              <button
+                id="filter-channel-pill-all"
+                type="button"
+                onClick={() => handleSetChannelFilter('all')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+                  channelFilter === 'all'
+                    ? 'bg-slate-900 text-white shadow-2xs font-bold'
+                    : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                }`}
+              >
+                <span>All</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                  channelFilter === 'all' ? 'bg-slate-800 text-slate-200' : 'bg-slate-100 text-slate-600'
+                }`}>
+                  {filteredSales.length}
+                </span>
+              </button>
+
+              {salesChannels.map((ch) => {
+                const count = filteredSales.filter(s => (s.channel || 'Direct') === ch).length;
+                const isSelected = channelFilter === ch;
+                return (
+                  <button
+                    key={ch}
+                    id={`filter-channel-pill-${ch.replace(/\s+/g, '-').toLowerCase()}`}
+                    type="button"
+                    onClick={() => handleSetChannelFilter(isSelected ? 'all' : ch)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+                      isSelected
+                        ? 'bg-pink-600 text-white shadow-2xs font-bold'
+                        : 'bg-white text-slate-700 hover:bg-pink-50 border border-slate-200 hover:border-pink-300'
+                    }`}
+                    title={`Filter sales by ${ch}`}
+                  >
+                    <span>{ch}</span>
+                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                      isSelected ? 'bg-pink-700 text-white' : 'bg-slate-100 text-slate-600'
+                    }`}>
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {onOpenManageChannels && (
+              <button
+                id="btn-inline-manage-channels-link"
+                type="button"
+                onClick={onOpenManageChannels}
+                className="text-xs text-pink-600 hover:text-pink-700 font-bold hover:underline shrink-0 ml-2 cursor-pointer flex items-center gap-1"
+                title="Add, edit, or delete sales channels"
+              >
+                <span>⚙️ Manage Channels</span>
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Sleek Search bar with Channel Filter */}
         <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 flex-1">
@@ -211,7 +295,7 @@ export const SalesView: React.FC<SalesViewProps> = ({
                 <select
                   id="select-channel-filter"
                   value={channelFilter}
-                  onChange={(e) => setChannelFilter(e.target.value)}
+                  onChange={(e) => handleSetChannelFilter(e.target.value)}
                   className="bg-slate-100 hover:bg-slate-200/70 border border-slate-200/80 rounded-xl px-2.5 py-1.5 text-xs font-semibold text-slate-700 outline-none cursor-pointer"
                   title="Filter sales transactions by sales channel"
                 >
@@ -236,7 +320,7 @@ export const SalesView: React.FC<SalesViewProps> = ({
             {channelFilter !== 'all' && (
               <button
                 id="btn-clear-channel-filter"
-                onClick={() => setChannelFilter('all')}
+                onClick={() => handleSetChannelFilter('all')}
                 className="text-xs font-bold text-pink-600 hover:underline cursor-pointer"
               >
                 Clear Channel
@@ -342,9 +426,14 @@ export const SalesView: React.FC<SalesViewProps> = ({
                   <div className="flex items-center justify-between text-xs pt-1">
                     <div className="flex items-center gap-2">
                       <span className="text-slate-600 font-medium">{sale.customer || 'Direct Customer'}</span>
-                      <span className={`text-[10px] px-2 py-0.5 rounded font-medium ${getChannelBadgeClass(sale.channel)}`}>
+                      <button
+                        type="button"
+                        onClick={() => handleSetChannelFilter(sale.channel || 'Direct')}
+                        className={`text-[10px] px-2 py-0.5 rounded font-medium transition-all hover:opacity-80 cursor-pointer ${getChannelBadgeClass(sale.channel)}`}
+                        title={`Filter sales by channel: ${sale.channel || 'Direct'}`}
+                      >
                         {sale.channel || 'Direct'}
-                      </span>
+                      </button>
                     </div>
                     <span className="font-semibold text-slate-700">{totalQty} total unit(s)</span>
                   </div>
@@ -456,9 +545,14 @@ export const SalesView: React.FC<SalesViewProps> = ({
                       </td>
                       <td className="py-3 px-4">
                         <div className="font-medium text-slate-800">{sale.customer || 'Direct Customer'}</div>
-                        <span className={`inline-block mt-0.5 text-[10px] px-2 py-0.2 rounded font-medium ${getChannelBadgeClass(sale.channel)}`}>
+                        <button
+                          type="button"
+                          onClick={() => handleSetChannelFilter(sale.channel || 'Direct')}
+                          className={`inline-block mt-0.5 text-[10px] px-2 py-0.5 rounded font-medium transition-all hover:opacity-80 cursor-pointer ${getChannelBadgeClass(sale.channel)}`}
+                          title={`Filter sales by channel: ${sale.channel || 'Direct'}`}
+                        >
                           {sale.channel || 'Direct'}
-                        </span>
+                        </button>
                       </td>
                       <td className="py-3 px-4 text-right font-bold text-slate-800">{totalQty}</td>
                       <td className="py-3 px-4 text-right text-slate-600">

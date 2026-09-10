@@ -1,5 +1,5 @@
 import React from 'react';
-import { Calendar, ChevronDown, Filter, FilterX, Layers } from 'lucide-react';
+import { Calendar, ChevronDown, Filter, FilterX, Layers, Tag } from 'lucide-react';
 import { ProductItem } from '../types';
 
 interface FilterBarProps {
@@ -8,13 +8,17 @@ interface FilterBarProps {
   selectedTimePreset: string;
   selectedCategory: string;
   selectedProductFilter: string;
+  selectedChannelFilter?: string;
   categories: string[];
   products: ProductItem[];
+  salesChannels?: string[];
   onPresetSelect: (preset: string) => void;
   onDateRangeChange: (start: string, end: string) => void;
   setSelectedCategory: (cat: string) => void;
   setSelectedProductFilter: (prod: string) => void;
+  setSelectedChannelFilter?: (channel: string) => void;
   setSelectedTimePreset: (preset: string) => void;
+  onOpenManageChannels?: () => void;
 }
 
 export const FilterBar: React.FC<FilterBarProps> = ({
@@ -23,13 +27,17 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   selectedTimePreset,
   selectedCategory,
   selectedProductFilter,
+  selectedChannelFilter = 'all',
   categories,
   products,
+  salesChannels = [],
   onPresetSelect,
   onDateRangeChange,
   setSelectedCategory,
   setSelectedProductFilter,
-  setSelectedTimePreset
+  setSelectedChannelFilter,
+  setSelectedTimePreset,
+  onOpenManageChannels
 }) => {
   const presets = [
     { id: 'today', label: 'Today' },
@@ -53,7 +61,11 @@ export const FilterBar: React.FC<FilterBarProps> = ({
     ? products
     : products.filter(p => p.category === selectedCategory);
 
-  const hasActiveFilter = selectedCategory !== 'all' || selectedProductFilter !== 'all' || selectedTimePreset !== 'all';
+  const hasActiveFilter =
+    selectedCategory !== 'all' ||
+    selectedProductFilter !== 'all' ||
+    (selectedChannelFilter && selectedChannelFilter !== 'all') ||
+    selectedTimePreset !== 'all';
 
   return (
     <div className="bg-white border-b border-slate-200/80 px-3 sm:px-6 lg:px-8 py-2.5 sm:py-3 transition-all">
@@ -114,8 +126,40 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             </div>
           </div>
 
-          {/* Category & Product Dropdowns - Wrapped for Mobile */}
+          {/* Category, Product & Sales Channel Dropdowns - Wrapped for Mobile */}
           <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 w-full sm:w-auto">
+            {/* Sales Channel Filter Selector */}
+            {salesChannels && salesChannels.length > 0 && (
+              <div className="relative flex-1 sm:flex-initial min-w-[135px]">
+                <select
+                  id="filter-channel"
+                  value={selectedChannelFilter}
+                  onChange={(e) => {
+                    if (e.target.value === '__manage_channels__') {
+                      if (onOpenManageChannels) onOpenManageChannels();
+                    } else if (setSelectedChannelFilter) {
+                      setSelectedChannelFilter(e.target.value);
+                    }
+                  }}
+                  className={`w-full sm:w-auto appearance-none border text-xs rounded-xl pl-3 pr-7 py-1.5 focus:outline-hidden focus:border-pink-500 font-medium cursor-pointer transition-colors ${
+                    selectedChannelFilter !== 'all'
+                      ? 'bg-pink-50 border-pink-300 text-pink-700 font-semibold'
+                      : 'bg-slate-50 border-slate-200 text-slate-700'
+                  }`}
+                  title="Filter by Sales Channel"
+                >
+                  <option value="all">All Channels</option>
+                  {salesChannels.map((ch) => (
+                    <option key={ch} value={ch}>
+                      {ch}
+                    </option>
+                  ))}
+                  <option value="__manage_channels__">⚙️ + Manage Channels...</option>
+                </select>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2 top-2 pointer-events-none" />
+              </div>
+            )}
+
             {/* Category Dropdown */}
             <div className="relative flex-1 sm:flex-initial min-w-[130px]">
               <select
@@ -156,6 +200,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
                 onClick={() => {
                   setSelectedCategory('all');
                   setSelectedProductFilter('all');
+                  if (setSelectedChannelFilter) setSelectedChannelFilter('all');
                   onPresetSelect('all');
                 }}
                 className="text-xs text-pink-600 hover:text-pink-700 font-semibold px-2 py-1.5 rounded-xl hover:bg-pink-50 border border-pink-200/80 transition-colors flex items-center gap-1 cursor-pointer shrink-0"

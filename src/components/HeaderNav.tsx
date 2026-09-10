@@ -50,6 +50,8 @@ interface HeaderNavProps {
   onSelectPreset?: (presetId: AccentPresetId) => void;
   onOpenSettings?: () => void;
   onOpenDeleteAccount?: () => void;
+  salesChannelsCount?: number;
+  onOpenManageChannels?: () => void;
 }
 
 export const HeaderNav: React.FC<HeaderNavProps> = ({
@@ -67,7 +69,9 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
   currentPreset = 'soft-pink',
   onSelectPreset,
   onOpenSettings,
-  onOpenDeleteAccount
+  onOpenDeleteAccount,
+  salesChannelsCount,
+  onOpenManageChannels
 }) => {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -152,6 +156,24 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
               <FileText className="w-4 h-4 text-pink-600" />
               <span>Export PDF</span>
             </button>
+
+            {/* Sales Channels Configuration Shortcut */}
+            {onOpenManageChannels && (
+              <button
+                id="btn-channels-top-header"
+                onClick={onOpenManageChannels}
+                className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 sm:px-3.5 sm:py-2 text-xs sm:text-sm font-semibold text-slate-700 bg-white hover:bg-pink-50/70 border border-slate-200 hover:border-pink-300 rounded-xl shadow-2xs transition-all cursor-pointer"
+                title="Manage Sales Channels (Instagram, WhatsApp, Website, etc.)"
+              >
+                <Tag className="w-4 h-4 text-pink-600" />
+                <span>Channels</span>
+                {salesChannelsCount !== undefined && (
+                  <span className="text-[10px] font-bold px-1.5 py-0.2 rounded-full bg-pink-100 text-pink-700">
+                    {salesChannelsCount}
+                  </span>
+                )}
+              </button>
+            )}
 
             {/* Record Sale Primary CTA */}
             <button
@@ -282,6 +304,28 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                           })}
                         </div>
                       </div>
+
+                      {/* Sales Channels Configuration */}
+                      {onOpenManageChannels && (
+                        <button
+                          id="btn-user-menu-manage-channels"
+                          onClick={() => {
+                            setShowUserMenu(false);
+                            onOpenManageChannels();
+                          }}
+                          className="w-full text-left px-3 py-2 rounded-lg hover:bg-pink-50 hover:text-pink-700 flex items-center justify-between cursor-pointer transition-colors"
+                        >
+                          <div className="flex items-center gap-2">
+                            <Tag className="w-4 h-4 text-pink-500" />
+                            <span>Sales Channels Config</span>
+                          </div>
+                          {salesChannelsCount !== undefined && (
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-pink-100 text-pink-700">
+                              {salesChannelsCount} active
+                            </span>
+                          )}
+                        </button>
+                      )}
 
                       <button
                         onClick={() => {
@@ -562,6 +606,20 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
                     <FileText className="w-4 h-4 text-pink-600" />
                     <span>Export PDF</span>
                   </button>
+
+                  {onOpenManageChannels && (
+                    <button
+                      id="btn-mobile-quick-channels"
+                      onClick={() => {
+                        setMobileMenuOpen(false);
+                        onOpenManageChannels();
+                      }}
+                      className="col-span-2 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-pink-50 hover:bg-pink-100 text-pink-700 border border-pink-200 font-semibold text-xs transition-all cursor-pointer"
+                    >
+                      <Tag className="w-4 h-4 text-pink-600" />
+                      <span>Manage Sales Channels ({salesChannelsCount ?? 'Dynamic'})</span>
+                    </button>
+                  )}
 
                   <button
                     id="btn-mobile-quick-guided-tour"

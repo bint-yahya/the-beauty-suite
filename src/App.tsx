@@ -111,6 +111,7 @@ export default function App({ data, updateItem }: AppProps = {}) {
   const [selectedTimePreset, setSelectedTimePreset] = useState('all');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [selectedProductFilter, setSelectedProductFilter] = useState('all');
+  const [selectedChannelFilter, setSelectedChannelFilter] = useState('all');
 
   // Core application state initialized from scoped user storage
   const initialData = useMemo(() => loadUserData(currentUser?.id), [currentUser?.id]);
@@ -228,6 +229,7 @@ export default function App({ data, updateItem }: AppProps = {}) {
   const handleResetFilters = () => {
     setSelectedCategory('all');
     setSelectedProductFilter('all');
+    setSelectedChannelFilter('all');
     setSelectedTimePreset('all');
     const curYearNow = new Date().getFullYear();
     handleDateRangeChange('2024-01-01', `${curYearNow + 1}-12-31`);
@@ -419,6 +421,10 @@ export default function App({ data, updateItem }: AppProps = {}) {
       if (startDate && s.date < startDate) return false;
       if (endDate && s.date > endDate) return false;
 
+      if (selectedChannelFilter !== 'all' && (s.channel || 'Direct') !== selectedChannelFilter) {
+        return false;
+      }
+
       if (selectedProductFilter !== 'all') {
         if (s.items && s.items.length > 0) {
           const hasProd = s.items.some(it => it.productId === selectedProductFilter);
@@ -454,7 +460,7 @@ export default function App({ data, updateItem }: AppProps = {}) {
 
       return true;
     });
-  }, [sales, startDate, endDate, selectedCategory, selectedProductFilter, products, combos]);
+  }, [sales, startDate, endDate, selectedCategory, selectedProductFilter, selectedChannelFilter, products, combos]);
 
   // Compute 360 Dashboard KPI Metrics
   const dashboardMetrics = useMemo(() => {
@@ -1247,6 +1253,8 @@ export default function App({ data, updateItem }: AppProps = {}) {
         onSelectPreset={handleSelectPreset}
         onOpenSettings={() => setShowSettingsModal(true)}
         onOpenDeleteAccount={() => setShowDeleteAccountModal(true)}
+        salesChannelsCount={salesChannels.length}
+        onOpenManageChannels={() => setShowManageChannelsModal(true)}
       />
 
       {/* Global Filter Bar - only display on operational tabs */}
@@ -1257,13 +1265,17 @@ export default function App({ data, updateItem }: AppProps = {}) {
           selectedTimePreset={selectedTimePreset}
           selectedCategory={selectedCategory}
           selectedProductFilter={selectedProductFilter}
+          selectedChannelFilter={selectedChannelFilter}
           categories={categories}
           products={products}
+          salesChannels={salesChannels}
           onPresetSelect={handlePresetSelect}
           onDateRangeChange={handleDateRangeChange}
           setSelectedCategory={setSelectedCategory}
           setSelectedProductFilter={setSelectedProductFilter}
+          setSelectedChannelFilter={setSelectedChannelFilter}
           setSelectedTimePreset={setSelectedTimePreset}
+          onOpenManageChannels={() => setShowManageChannelsModal(true)}
         />
       )}
 
@@ -1351,6 +1363,8 @@ export default function App({ data, updateItem }: AppProps = {}) {
             getProductCostBreakdown={getProductCostBreakdown}
             getComboCostBreakdown={getComboCostBreakdown}
             salesChannels={salesChannels}
+            channelFilter={selectedChannelFilter}
+            onChannelFilterChange={setSelectedChannelFilter}
             onOpenManageChannels={() => setShowManageChannelsModal(true)}
           />
         )}
