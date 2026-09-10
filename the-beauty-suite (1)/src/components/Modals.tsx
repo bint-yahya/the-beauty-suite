@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, ShoppingBag, Truck, Tag, Sparkles, Trash2 } from 'lucide-react';
+import { X, ShoppingBag, Truck, Tag, Sparkles, Trash2, Plus, Package, Box } from 'lucide-react';
 import { ProductItem, ComboItem, formatNaira } from '../types';
 
 interface ModalsProps {
@@ -36,6 +36,7 @@ interface ModalsProps {
   products: ProductItem[];
   combos: ComboItem[];
   getComboCostBreakdown: (c: ComboItem) => any;
+  getProductCostBreakdown?: (p: ProductItem) => any;
 }
 
 export const Modals: React.FC<ModalsProps> = ({
@@ -76,174 +77,476 @@ export const Modals: React.FC<ModalsProps> = ({
   return (
     <>
       {/* MODAL 1: RECORD OR EDIT SALE */}
-      {showAddSaleModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/40 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl max-w-md w-full p-4 sm:p-6 shadow-xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto animate-in fade-in duration-200">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div>
-                <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
-                  <ShoppingBag className="w-5 h-5 text-pink-600" />
-                  {editingSaleId ? `Edit Sale Record (${editingSaleId})` : 'Record Sale — the beauty suite'}
-                </h3>
-                {editingSaleId && (
+      {showAddSaleModal && (() => {
+        // Safe access to items list
+        const saleItems = (newSale.items && newSale.items.length > 0) ? newSale.items : [
+          {
+            productId: newSale.itemId || products[0]?.id || '',
+            qty: Number(newSale.qty) || 1,
+            unitPrice: Number(newSale.sellingPrice) >= 0 ? Number(newSale.sellingPrice) : (products[0]?.sellingPrice || 3500)
+          }
+        ];
+
+        const handleAddProductLine = () => {
+          const existingIds = new Set(saleItems.map((i: any) => i.productId));
+          const nextProd = products.find(p => !existingIds.has(p.id)) || products[0];
+          const newItem = {
+            productId: nextProd?.id || '',
+            qty: 1,
+            unitPrice: nextProd?.sellingPrice || 3500
+          };
+          const updatedItems = [...saleItems, newItem];
+          setNewSale({
+            ...newSale,
+            items: updatedItems,
+            itemId: updatedItems[0]?.productId || '',
+            qty: updatedItems.reduce((acc: number, it: any) => acc + (Number(it.qty) || 0), 0),
+            sellingPrice: updatedItems[0]?.unitPrice || 0
+          });
+        };
+
+        const handleUpdateProductLine = (idx: number, field: string, val: any) => {
+          const updatedItems = saleItems.map((it: any, i: number) => {
+            if (i !== idx) return it;
+            const updated = { ...it };
+            if (field === 'productId') {
+              updated.productId = val;
+              const p = products.find(prod => prod.id === val);
+              if (p) {
+                updated.unitPrice = p.sellingPrice;
+              }
+            } else if (field === 'qty') {
+              updated.qty = Math.max(1, Number(val) || 1);
+            } else if (field === 'unitPrice') {
+              updated.unitPrice = Math.max(0, Number(val) || 0);
+            }
+            return updated;
+          });
+
+          setNewSale({
+            ...newSale,
+            items: updatedItems,
+            itemId: updatedItems[0]?.productId || '',
+            qty: updatedItems.reduce((acc: number, it: any) => acc + (Number(it.qty) || 0), 0),
+            sellingPrice: updatedItems[0]?.unitPrice || 0
+          });
+        };
+
+        const handleRemoveProductLine = (idx: number) => {
+          if (saleItems.length <= 1) return;
+          const updatedItems = saleItems.filter((_: any, i: number) => i !== idx);
+          setNewSale({
+            ...newSale,
+            items: updatedItems,
+            itemId: updatedItems[0]?.productId || '',
+            qty: updatedItems.reduce((acc: number, it: any) => acc + (Number(it.qty) || 0), 0),
+            sellingPrice: updatedItems[0]?.unitPrice || 0
+          });
+        };
+
+        // Real-time calculation of transaction totals
+        let saleTotalRevenue = 0;
+        let saleTotalUnits = 0;
+        let saleTotalCost = 0;
+        const currentSalePackaging = Number(newSale.packagingCost) >= 0 ? Number(newSale.packagingCost) : 0;
+
+        if (newSale.type === 'combo') {
+          const cmbId = newSale.comboId || newSale.itemId || combos[0]?.id;
+          const cmb = combos.find(c => c.id === cmbId);
+          const qty = Math.max(1, Number(newSale.comboQty || newSale.qty) || 1);
+          const price = Number(newSale.comboSellingPrice !== undefined ? newSale.comboSellingPrice : newSale.sellingPrice) || 0;
+          saleTotalRevenue = qty * price;
+          saleTotalUnits = qty;
+          if (cmb) {
+            const breakdown = getComboCostBreakdown(cmb);
+            saleTotalCost = breakdown.totalCost * qty;
+          }
+        } else {
+          let itemsBaseCost = 0;
+          saleItems.forEach((it: any) => {
+            const q = Number(it.qty) || 0;
+            const p = Number(it.unitPrice) || 0;
+            saleTotalRevenue += q * p;
+            saleTotalUnits += q;
+            const prod = products.find(pr => pr.id === it.productId);
+            if (prod) {
+              const unitBase = (Number(prod.unitLandedCost) || 0) + (Number(prod.giftCost) || 0) + (Number(prod.miscCost) || 0);
+              itemsBaseCost += unitBase * q;
+            }
+          });
+          saleTotalCost = itemsBaseCost + currentSalePackaging;
+        }
+
+        const saleNetProfit = saleTotalRevenue - saleTotalCost;
+        const saleMarginPercent = saleTotalRevenue > 0 ? (saleNetProfit / saleTotalRevenue) * 100 : 0;
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/40 backdrop-blur-xs">
+            <div className="bg-white rounded-2xl max-w-lg w-full p-4 sm:p-6 shadow-xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto animate-in fade-in duration-200">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div>
+                  <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                    <ShoppingBag className="w-5 h-5 text-pink-600" />
+                    {editingSaleId ? `Edit Sale Record (${editingSaleId})` : 'Record Sale — the beauty suite'}
+                  </h3>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    Update customer, channel, quantity, or sale price
+                    {editingSaleId
+                      ? 'Update items, quantities, packaging, or customer details'
+                      : 'Log a customer purchase with single or multiple products and custom packaging'}
                   </p>
-                )}
-              </div>
-              <button
-                onClick={() => {
-                  if (onCloseSaleModal) onCloseSaleModal();
-                  else setShowAddSaleModal(false);
-                }}
-                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveSale} className="space-y-3.5 text-xs">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="font-semibold text-slate-600 block mb-1">Date</label>
-                  <input
-                    type="date"
-                    required
-                    value={newSale.date}
-                    onChange={(e) => setNewSale({ ...newSale, date: e.target.value })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:bg-white focus:border-pink-500 outline-none cursor-pointer"
-                  />
                 </div>
-                <div>
-                  <label className="font-semibold text-slate-600 block mb-1">Sale Type</label>
-                  <select
-                    value={newSale.type}
-                    onChange={(e) => {
-                      const typeVal = e.target.value as 'single' | 'combo';
-                      const firstItem = typeVal === 'single' ? products[0] : combos[0];
-                      const price = typeVal === 'single' ? (firstItem?.sellingPrice || 3500) : (firstItem?.customSellingPrice || 5400);
-                      setNewSale({
-                        ...newSale,
-                        type: typeVal,
-                        itemId: firstItem?.id || '',
-                        sellingPrice: price
-                      });
-                    }}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:bg-white focus:border-pink-500 outline-none cursor-pointer"
-                  >
-                    <option value="single">Single SKU</option>
-                    <option value="combo">Bundle Combo</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="font-semibold text-slate-600 block mb-1">Select Item</label>
-                <select
-                  value={newSale.itemId || (newSale.type === 'single' ? products[0]?.id : combos[0]?.id) || ''}
-                  onChange={(e) => {
-                    const id = e.target.value;
-                    let price = newSale.sellingPrice;
-                    if (newSale.type === 'single') {
-                      const p = products.find(prod => prod.id === id);
-                      if (p) price = p.sellingPrice;
-                    } else {
-                      const cmb = combos.find(c => c.id === id);
-                      if (cmb) price = getComboCostBreakdown(cmb).finalSellingPrice;
-                    }
-                    setNewSale({ ...newSale, itemId: id, sellingPrice: price });
-                  }}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:bg-white focus:border-pink-500 outline-none cursor-pointer"
-                >
-                  {newSale.type === 'single'
-                    ? products.map(p => <option key={p.id} value={p.id}>{p.name} ({formatNaira(p.sellingPrice)})</option>)
-                    : combos.map(c => <option key={c.id} value={c.id}>{c.name} ({formatNaira(getComboCostBreakdown(c).finalSellingPrice)})</option>)
-                  }
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="font-semibold text-slate-600 block mb-1">Quantity</label>
-                  <input
-                    type="number"
-                    min="1"
-                    required
-                    value={newSale.qty}
-                    onChange={(e) => setNewSale({ ...newSale, qty: Number(e.target.value) })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-bold text-slate-800 focus:bg-white focus:border-pink-500 outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="font-semibold text-slate-600 block mb-1">Unit Selling Price (₦)</label>
-                  <input
-                    type="number"
-                    required
-                    value={newSale.sellingPrice}
-                    onChange={(e) => setNewSale({ ...newSale, sellingPrice: Number(e.target.value) })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-bold text-pink-600 focus:bg-white focus:border-pink-500 outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="font-semibold text-slate-600 block mb-1">Customer Name</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Amina"
-                    value={newSale.customer}
-                    onChange={(e) => setNewSale({ ...newSale, customer: e.target.value })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 focus:bg-white focus:border-pink-500 outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="font-semibold text-slate-600 block mb-1">Sales Channel</label>
-                  <select
-                    value={newSale.channel}
-                    onChange={(e) => setNewSale({ ...newSale, channel: e.target.value })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:bg-white focus:border-pink-500 outline-none cursor-pointer"
-                  >
-                    <option value="Snapchat">Snapchat</option>
-                    <option value="Instagram DM">Instagram DM</option>
-                    <option value="WhatsApp">WhatsApp</option>
-                    <option value="Website">Website</option>
-                    <option value="Pop-Up Fair">Pop-Up Fair</option>
-                    <option value="Tiktok Shop">Tiktok Shop</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="p-3.5 bg-slate-50 rounded-xl flex items-center justify-between border border-slate-100">
-                <span className="font-semibold text-slate-600">Total Transaction:</span>
-                <span className="text-base font-bold text-pink-600">
-                  {formatNaira((Number(newSale.qty) || 0) * (Number(newSale.sellingPrice) || 0))}
-                </span>
-              </div>
-
-              <div className="flex gap-2.5 pt-2">
                 <button
-                  type="button"
                   onClick={() => {
                     if (onCloseSaleModal) onCloseSaleModal();
                     else setShowAddSaleModal(false);
                   }}
-                  className="w-1/2 py-2.5 rounded-xl border border-slate-200 text-slate-600 font-semibold cursor-pointer hover:bg-slate-50 transition-colors"
+                  className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
                 >
-                  Cancel
-                </button>
-                <button
-                  id="btn-save-sale-submit"
-                  type="submit"
-                  className="w-1/2 py-2.5 rounded-xl bg-pink-500 hover:bg-pink-600 text-white font-bold shadow-md shadow-pink-300 transition-all cursor-pointer active:scale-95"
-                >
-                  {editingSaleId ? 'Update Sale Record' : 'Confirm Sale'}
+                  <X className="w-4 h-4" />
                 </button>
               </div>
-            </form>
+
+              <form onSubmit={handleSaveSale} className="space-y-4 text-xs">
+                {/* Date & Sale Type Selector */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="font-semibold text-slate-600 block mb-1">Sale Date</label>
+                    <input
+                      type="date"
+                      required
+                      value={newSale.date}
+                      onChange={(e) => setNewSale({ ...newSale, date: e.target.value })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:bg-white focus:border-pink-500 outline-none cursor-pointer"
+                    />
+                  </div>
+                  <div>
+                    <label className="font-semibold text-slate-600 block mb-1">Sale Type</label>
+                    <select
+                      value={newSale.type}
+                      onChange={(e) => {
+                        const typeVal = e.target.value as 'single' | 'combo';
+                        setNewSale({
+                          ...newSale,
+                          type: typeVal
+                        });
+                      }}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:bg-white focus:border-pink-500 outline-none cursor-pointer"
+                    >
+                      <option value="single">Single / Multi-Product Order</option>
+                      <option value="combo">Predefined Bundle Combo</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Customer Details & Sales Channel */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="font-semibold text-slate-600 block mb-1">Customer Name</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Amina Bello"
+                      value={newSale.customer}
+                      onChange={(e) => setNewSale({ ...newSale, customer: e.target.value })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 focus:bg-white focus:border-pink-500 outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="font-semibold text-slate-600 block mb-1">Sales Channel</label>
+                    <select
+                      value={newSale.channel}
+                      onChange={(e) => setNewSale({ ...newSale, channel: e.target.value })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:bg-white focus:border-pink-500 outline-none cursor-pointer"
+                    >
+                      <option value="Snapchat">Snapchat</option>
+                      <option value="Instagram DM">Instagram DM</option>
+                      <option value="WhatsApp">WhatsApp</option>
+                      <option value="Website">Website</option>
+                      <option value="Pop-Up Fair">Pop-Up Fair</option>
+                      <option value="Tiktok Shop">Tiktok Shop</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* SECTION A: SINGLE OR MULTI-PRODUCT ORDER */}
+                {newSale.type === 'single' ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between border-b border-slate-100 pb-1.5">
+                      <div className="flex items-center gap-2">
+                        <Package className="w-4 h-4 text-pink-600" />
+                        <span className="font-bold text-slate-700 text-xs">Products in this Sale</span>
+                        <span className="bg-pink-100 text-pink-700 text-[10px] font-bold px-1.5 py-0.2 rounded-full">
+                          {saleItems.length} SKU{saleItems.length > 1 ? 's' : ''}
+                        </span>
+                      </div>
+                      <span className="text-[11px] text-slate-400">Total: {saleTotalUnits} unit(s)</span>
+                    </div>
+
+                    {/* Dynamic Product Rows */}
+                    <div className="space-y-2.5 max-h-[36vh] overflow-y-auto pr-1">
+                      {saleItems.map((item: any, idx: number) => {
+                        const prod = products.find(p => p.id === item.productId);
+                        const rowTotal = (Number(item.qty) || 0) * (Number(item.unitPrice) || 0);
+
+                        return (
+                          <div
+                            key={idx}
+                            className="bg-slate-50/80 border border-slate-200/80 rounded-xl p-2.5 space-y-2 relative hover:border-pink-300 transition-colors"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[10px] font-bold uppercase text-slate-400">
+                                Product #{idx + 1}
+                              </span>
+                              {saleItems.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveProductLine(idx)}
+                                  className="text-slate-400 hover:text-rose-600 p-1 rounded-md hover:bg-rose-50 transition-colors cursor-pointer"
+                                  title="Remove item"
+                                  aria-label={`Remove item ${idx + 1}`}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+
+                            {/* Product Selector */}
+                            <div>
+                              <select
+                                value={item.productId}
+                                onChange={(e) => handleUpdateProductLine(idx, 'productId', e.target.value)}
+                                className="w-full bg-white border border-slate-200 rounded-lg p-1.5 font-medium text-slate-800 focus:border-pink-500 outline-none cursor-pointer text-xs"
+                              >
+                                {products.map(p => (
+                                  <option key={p.id} value={p.id}>
+                                    {p.name} [{p.category}] — {formatNaira(p.sellingPrice)}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            {/* Quantity, Unit Price & Line Total */}
+                            <div className="grid grid-cols-3 gap-2 items-center">
+                              <div>
+                                <label className="text-[10px] text-slate-500 font-semibold block mb-0.5">Quantity</label>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  required
+                                  value={item.qty}
+                                  onChange={(e) => handleUpdateProductLine(idx, 'qty', e.target.value)}
+                                  className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 font-bold text-slate-800 text-xs focus:border-pink-500 outline-none"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[10px] text-slate-500 font-semibold block mb-0.5">Unit Price (₦)</label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  required
+                                  value={item.unitPrice}
+                                  onChange={(e) => handleUpdateProductLine(idx, 'unitPrice', e.target.value)}
+                                  className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 font-bold text-pink-600 text-xs focus:border-pink-500 outline-none"
+                                />
+                              </div>
+                              <div className="text-right">
+                                <span className="text-[10px] text-slate-400 block mb-0.5">Subtotal</span>
+                                <span className="font-bold text-slate-700 text-xs block">{formatNaira(rowTotal)}</span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Button to Add More Products to this Sale */}
+                    <button
+                      type="button"
+                      onClick={handleAddProductLine}
+                      className="w-full py-2 border border-dashed border-pink-300 hover:border-pink-500 bg-pink-50/40 hover:bg-pink-50 text-pink-700 font-semibold rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer text-xs"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Add Another Product to this Sale</span>
+                    </button>
+
+                    {/* DEDICATED ORDER PACKAGING COST SECTION */}
+                    <div className="bg-amber-50/70 border border-amber-200/80 rounded-xl p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="font-bold text-slate-700 flex items-center gap-1.5 text-xs">
+                          <Box className="w-4 h-4 text-amber-600" />
+                          <span>Order Packaging Cost (₦)</span>
+                        </label>
+                        <span className="text-[10px] font-semibold text-amber-700 bg-amber-100/80 px-2 py-0.5 rounded-full">
+                          Single packaging for this entire sale
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 leading-tight">
+                        One packaging charge for this whole customer purchase (e.g. 1 shipping box or pouch). If the customer bought large quantities requiring multiple packages, adjust the cost here.
+                      </p>
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                        <div className="relative flex-1">
+                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xs">₦</span>
+                          <input
+                            type="number"
+                            min="0"
+                            required
+                            value={newSale.packagingCost !== undefined ? newSale.packagingCost : ''}
+                            onChange={(e) => setNewSale({ ...newSale, packagingCost: Math.max(0, Number(e.target.value) || 0) })}
+                            className="w-full pl-6 pr-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 focus:border-pink-500 outline-none"
+                            placeholder="e.g. 200"
+                          />
+                        </div>
+                        <div className="flex items-center gap-1 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() => setNewSale({ ...newSale, packagingCost: 0 })}
+                            className="px-2 py-1 rounded-md text-[10px] font-semibold bg-white hover:bg-amber-100 border border-amber-200 text-slate-600 hover:text-amber-800 transition-colors cursor-pointer"
+                            title="No packaging / In-person pickup"
+                          >
+                            ₦0 (None)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setNewSale({ ...newSale, packagingCost: 200 })}
+                            className="px-2 py-1 rounded-md text-[10px] font-semibold bg-white hover:bg-amber-100 border border-amber-200 text-slate-600 hover:text-amber-800 transition-colors cursor-pointer"
+                            title="1 Standard pouch / box"
+                          >
+                            ₦200 (Standard)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setNewSale({ ...newSale, packagingCost: 350 })}
+                            className="px-2 py-1 rounded-md text-[10px] font-semibold bg-white hover:bg-amber-100 border border-amber-200 text-slate-600 hover:text-amber-800 transition-colors cursor-pointer"
+                            title="1 Medium mailer box"
+                          >
+                            ₦350 (Medium)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setNewSale({ ...newSale, packagingCost: 500 })}
+                            className="px-2 py-1 rounded-md text-[10px] font-semibold bg-white hover:bg-amber-100 border border-amber-200 text-slate-600 hover:text-amber-800 transition-colors cursor-pointer"
+                            title="Large package or 2 shipping boxes"
+                          >
+                            ₦500 (2 Boxes)
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  /* SECTION B: PREDEFINED COMBO BUNDLE ORDER */
+                  <div className="space-y-3">
+                    <div>
+                      <label className="font-semibold text-slate-600 block mb-1">Select Bundle Combo</label>
+                      <select
+                        value={newSale.comboId || newSale.itemId || combos[0]?.id || ''}
+                        onChange={(e) => {
+                          const cmbId = e.target.value;
+                          const cmb = combos.find(c => c.id === cmbId);
+                          const price = cmb ? getComboCostBreakdown(cmb).finalSellingPrice : 5400;
+                          setNewSale({
+                            ...newSale,
+                            comboId: cmbId,
+                            itemId: cmbId,
+                            comboSellingPrice: price,
+                            sellingPrice: price
+                          });
+                        }}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:bg-white focus:border-pink-500 outline-none cursor-pointer"
+                      >
+                        {combos.map(c => (
+                          <option key={c.id} value={c.id}>
+                            {c.name} ({formatNaira(getComboCostBreakdown(c).finalSellingPrice)})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="font-semibold text-slate-600 block mb-1">Bundle Quantity</label>
+                        <input
+                          type="number"
+                          min="1"
+                          required
+                          value={newSale.comboQty !== undefined ? newSale.comboQty : (newSale.qty || 1)}
+                          onChange={(e) => {
+                            const q = Number(e.target.value);
+                            setNewSale({ ...newSale, comboQty: q, qty: q });
+                          }}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-bold text-slate-800 focus:bg-white focus:border-pink-500 outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="font-semibold text-slate-600 block mb-1">Selling Price per Bundle (₦)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          required
+                          value={newSale.comboSellingPrice !== undefined ? newSale.comboSellingPrice : (newSale.sellingPrice || 0)}
+                          onChange={(e) => {
+                            const p = Number(e.target.value);
+                            setNewSale({ ...newSale, comboSellingPrice: p, sellingPrice: p });
+                          }}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-bold text-pink-600 focus:bg-white focus:border-pink-500 outline-none"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* TRANSACTION FINANCIAL BREAKDOWN & PROFIT ESTIMATE */}
+                <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3 space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-500">Items Ordered:</span>
+                    <span className="font-semibold text-slate-700">
+                      {saleTotalUnits} unit(s) {newSale.type === 'single' ? `(${saleItems.length} product${saleItems.length > 1 ? 's' : ''})` : ''}
+                    </span>
+                  </div>
+                  {newSale.type === 'single' && (
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-500">Order Packaging:</span>
+                      <span className="font-semibold text-amber-700">{formatNaira(currentSalePackaging)}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between text-xs border-t border-slate-200/60 pt-1.5">
+                    <span className="font-bold text-slate-700">Total Transaction:</span>
+                    <span className="text-sm font-bold text-pink-600">{formatNaira(saleTotalRevenue)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-500">Estimated Net Profit:</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-bold text-emerald-600">{formatNaira(saleNetProfit)}</span>
+                      <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded-full ${saleMarginPercent >= 30 ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                        {saleMarginPercent.toFixed(1)}% margin
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex gap-2.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onCloseSaleModal) onCloseSaleModal();
+                      else setShowAddSaleModal(false);
+                    }}
+                    className="w-1/2 py-2.5 rounded-xl border border-slate-200 text-slate-600 font-semibold cursor-pointer hover:bg-slate-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    id="btn-save-sale-submit"
+                    type="submit"
+                    className="w-1/2 py-2.5 rounded-xl bg-pink-500 hover:bg-pink-600 text-white font-bold shadow-md shadow-pink-300 transition-all cursor-pointer active:scale-95"
+                  >
+                    {editingSaleId ? 'Update Sale Record' : 'Confirm Sale'}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* MODAL 2: ADD OR EDIT STOCK IN BATCH */}
       {showAddBatchModal && (

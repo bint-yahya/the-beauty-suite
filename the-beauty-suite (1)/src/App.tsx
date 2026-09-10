@@ -4,7 +4,12 @@ import {
   ComboItem,
   BatchOrder,
   SaleRecord,
+  SaleItemEntry,
   InventoryStockItem,
+  getSaleTotalRevenue,
+  getSaleTotalQty,
+  getSaleCost,
+  getSaleProfit,
   INITIAL_PRODUCTS,
   INITIAL_COMBOS,
   INITIAL_BATCHES,
@@ -316,12 +321,19 @@ export default function App({ data, updateItem }: AppProps = {}) {
     });
 
     sales.forEach(s => {
-      const saleQty = Number(s.qty) || 0;
-      if (s.type === 'single') {
+      if (s.items && s.items.length > 0) {
+        s.items.forEach(it => {
+          if (stockMap[it.productId]) {
+            stockMap[it.productId].totalSold += (Number(it.qty) || 0);
+          }
+        });
+      } else if (s.type === 'single') {
+        const saleQty = Number(s.qty) || 0;
         if (stockMap[s.itemId]) {
           stockMap[s.itemId].totalSold += saleQty;
         }
       } else if (s.type === 'combo') {
+        const saleQty = Number(s.qty) || 0;
         const cmb = combos.find(c => c.id === s.itemId);
         if (cmb && cmb.items) {
           cmb.items.forEach(ci => {
@@ -400,8 +412,12 @@ export default function App({ data, updateItem }: AppProps = {}) {
       if (endDate && s.date > endDate) return false;
 
       if (selectedProductFilter !== 'all') {
-        if (s.type === 'single' && s.itemId !== selectedProductFilter) return false;
-        if (s.type === 'combo') {
+        if (s.items && s.items.length > 0) {
+          const hasProd = s.items.some(it => it.productId === selectedProductFilter);
+          if (!hasProd) return false;
+        } else if (s.type === 'single' && s.itemId !== selectedProductFilter) {
+          return false;
+        } else if (s.type === 'combo') {
           const cmb = combos.find(c => c.id === s.itemId);
           const hasProd = cmb && cmb.items.some(ci => ci.productId === selectedProductFilter);
           if (!hasProd) return false;
@@ -409,7 +425,13 @@ export default function App({ data, updateItem }: AppProps = {}) {
       }
 
       if (selectedCategory !== 'all') {
-        if (s.type === 'single') {
+        if (s.items && s.items.length > 0) {
+          const matches = s.items.some(it => {
+            const prod = products.find(p => p.id === it.productId);
+            return prod && prod.category === selectedCategory;
+          });
+          if (!matches) return false;
+        } else if (s.type === 'single') {
           const prod = products.find(p => p.id === s.itemId);
           if (!prod || prod.category !== selectedCategory) return false;
         } else if (s.type === 'combo') {
@@ -434,25 +456,31 @@ export default function App({ data, updateItem }: AppProps = {}) {
     const productSoldBreakdown: Record<string, number> = {};
 
     filteredSales.forEach(s => {
-      const qty = Number(s.qty) || 0;
-      const unitPrice = Number(s.sellingPrice) || 0;
-      const rev = qty * unitPrice;
-      totalRevenue += rev;
-      totalItemsSold += qty;
+      const rev = getSaleTotalRevenue(s);
+      const cost = getSaleCost(s, products, combos);
+      const units = getSaleTotalQty(s);
 
-      if (s.type === 'single') {
+      totalRevenue += rev;
+      totalCost += cost;
+      totalItemsSold += units;
+
+      if (s.items && s.items.length > 0) {
+        s.items.forEach(it => {
+          const itQty = Number(it.qty) || 0;
+          const prod = products.find(p => p.id === it.productId);
+          if (prod) {
+            productSoldBreakdown[prod.name] = (productSoldBreakdown[prod.name] || 0) + itQty;
+          }
+        });
+      } else if (s.type === 'single') {
         const prod = products.find(p => p.id === s.itemId);
         if (prod) {
-          const breakdown = getProductCostBreakdown(prod);
-          totalCost += breakdown.totalCost * qty;
-          productSoldBreakdown[prod.name] = (productSoldBreakdown[prod.name] || 0) + qty;
+          productSoldBreakdown[prod.name] = (productSoldBreakdown[prod.name] || 0) + units;
         }
       } else if (s.type === 'combo') {
         const cmb = combos.find(c => c.id === s.itemId);
         if (cmb) {
-          const breakdown = getComboCostBreakdown(cmb);
-          totalCost += breakdown.totalCost * qty;
-          productSoldBreakdown[cmb.name] = (productSoldBreakdown[cmb.name] || 0) + qty;
+          productSoldBreakdown[cmb.name] = (productSoldBreakdown[cmb.name] || 0) + units;
         }
       }
     });
@@ -496,16 +524,10 @@ export default function App({ data, updateItem }: AppProps = {}) {
       if (!dailyMap[s.date]) {
         dailyMap[s.date] = { date: s.date, revenue: 0, profit: 0, count: 0 };
       }
-      const qty = Number(s.qty) || 0;
-      const rev = qty * (Number(s.sellingPrice) || 0);
-      let cost = 0;
-      if (s.type === 'single') {
-        const prod = products.find(p => p.id === s.itemId);
-        if (prod) cost = getProductCostBreakdown(prod).totalCost * qty;
-      } else {
-        const cmb = combos.find(c => c.id === s.itemId);
-        if (cmb) cost = getComboCostBreakdown(cmb).totalCost * qty;
-      }
+      const rev = getSaleTotalRevenue(s);
+      const cost = getSaleCost(s, products, combos);
+      const qty = getSaleTotalQty(s);
+
       dailyMap[s.date].revenue += rev;
       dailyMap[s.date].profit += (rev - cost);
       dailyMap[s.date].count += qty;
@@ -658,66 +680,204 @@ export default function App({ data, updateItem }: AppProps = {}) {
     qty: 1,
     sellingPrice: products[0]?.sellingPrice || 3500,
     customer: '',
-    channel: 'Instagram DM'
+    channel: 'Instagram DM',
+    items: [
+      {
+        productId: products[0]?.id || '',
+        qty: 1,
+        unitPrice: products[0]?.sellingPrice || 3500
+      }
+    ],
+    packagingCost: products[0]?.packagingCost !== undefined ? Number(products[0].packagingCost) : 200,
+    comboId: combos[0]?.id || '',
+    comboQty: 1,
+    comboSellingPrice: combos[0] ? 5400 : 5400
   });
 
   const handleOpenRecordSale = () => {
     setEditingSaleId(null);
+    const firstProd = products[0];
+    const defaultPkg = firstProd?.packagingCost !== undefined ? Number(firstProd.packagingCost) : 200;
     setNewSale({
       date: new Date().toISOString().slice(0, 10),
       type: 'single',
-      itemId: products[0]?.id || '',
+      itemId: firstProd?.id || '',
       qty: 1,
-      sellingPrice: products[0]?.sellingPrice || 3500,
+      sellingPrice: firstProd?.sellingPrice || 3500,
       customer: '',
-      channel: 'Instagram DM'
+      channel: 'Instagram DM',
+      items: [
+        {
+          productId: firstProd?.id || '',
+          qty: 1,
+          unitPrice: firstProd?.sellingPrice || 3500
+        }
+      ],
+      packagingCost: defaultPkg,
+      comboId: combos[0]?.id || '',
+      comboQty: 1,
+      comboSellingPrice: combos[0] ? getComboCostBreakdown(combos[0]).finalSellingPrice : 5400
     });
     setShowAddSaleModal(true);
   };
 
   const handleOpenEditSale = (sale: SaleRecord) => {
     setEditingSaleId(sale.id);
-    setNewSale({
-      date: sale.date || new Date().toISOString().slice(0, 10),
-      type: sale.type,
-      itemId: sale.itemId,
-      qty: Number(sale.qty) || 1,
-      sellingPrice: Number(sale.sellingPrice) >= 0 ? Number(sale.sellingPrice) : 0,
-      customer: sale.customer || '',
-      channel: sale.channel || 'Instagram DM'
-    });
+    if (sale.type === 'combo') {
+      const cmb = combos.find(c => c.id === sale.itemId);
+      const price = Number(sale.sellingPrice) >= 0 ? Number(sale.sellingPrice) : (cmb ? getComboCostBreakdown(cmb).finalSellingPrice : 5400);
+      setNewSale({
+        date: sale.date || new Date().toISOString().slice(0, 10),
+        type: 'combo',
+        itemId: sale.itemId,
+        qty: Number(sale.qty) || 1,
+        sellingPrice: price,
+        customer: sale.customer || '',
+        channel: sale.channel || 'Instagram DM',
+        items: [
+          {
+            productId: products[0]?.id || '',
+            qty: 1,
+            unitPrice: products[0]?.sellingPrice || 3500
+          }
+        ],
+        packagingCost: 0,
+        comboId: sale.itemId,
+        comboQty: Number(sale.qty) || 1,
+        comboSellingPrice: price
+      });
+    } else {
+      let itemsList: SaleItemEntry[] = [];
+      let pkg = 0;
+      if (sale.items && sale.items.length > 0) {
+        itemsList = sale.items.map(it => ({
+          productId: it.productId,
+          qty: Number(it.qty) || 1,
+          unitPrice: Number(it.unitPrice) >= 0 ? Number(it.unitPrice) : 0
+        }));
+        pkg = sale.packagingCost !== undefined ? Number(sale.packagingCost) : 0;
+      } else {
+        const p = products.find(prod => prod.id === sale.itemId);
+        itemsList = [
+          {
+            productId: sale.itemId || products[0]?.id || '',
+            qty: Number(sale.qty) || 1,
+            unitPrice: Number(sale.sellingPrice) >= 0 ? Number(sale.sellingPrice) : (p?.sellingPrice || 3500)
+          }
+        ];
+        pkg = sale.packagingCost !== undefined ? Number(sale.packagingCost) : (p?.packagingCost || 200);
+      }
+
+      setNewSale({
+        date: sale.date || new Date().toISOString().slice(0, 10),
+        type: 'single',
+        itemId: itemsList[0]?.productId || products[0]?.id || '',
+        qty: itemsList.reduce((acc, it) => acc + (Number(it.qty) || 0), 0),
+        sellingPrice: itemsList[0]?.unitPrice || 0,
+        customer: sale.customer || '',
+        channel: sale.channel || 'Instagram DM',
+        items: itemsList,
+        packagingCost: pkg,
+        comboId: combos[0]?.id || '',
+        comboQty: 1,
+        comboSellingPrice: combos[0] ? getComboCostBreakdown(combos[0]).finalSellingPrice : 5400
+      });
+    }
     setShowAddSaleModal(true);
   };
 
   const handleRepeatLastSale = () => {
     if (sales.length === 0) return;
-    // Obtain the most recent sale by date or latest record
     const sorted = [...sales].sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
     const lastSale = sorted[0];
     setEditingSaleId(null);
-    setNewSale({
-      date: new Date().toISOString().slice(0, 10),
-      type: lastSale.type,
-      itemId: lastSale.itemId,
-      qty: Number(lastSale.qty) || 1,
-      sellingPrice: Number(lastSale.sellingPrice) >= 0 ? Number(lastSale.sellingPrice) : 0,
-      customer: lastSale.customer || '',
-      channel: lastSale.channel || 'Instagram DM'
-    });
+    if (lastSale.type === 'combo') {
+      const cmb = combos.find(c => c.id === lastSale.itemId);
+      const price = Number(lastSale.sellingPrice) >= 0 ? Number(lastSale.sellingPrice) : (cmb ? getComboCostBreakdown(cmb).finalSellingPrice : 5400);
+      setNewSale({
+        date: new Date().toISOString().slice(0, 10),
+        type: 'combo',
+        itemId: lastSale.itemId,
+        qty: Number(lastSale.qty) || 1,
+        sellingPrice: price,
+        customer: lastSale.customer || '',
+        channel: lastSale.channel || 'Instagram DM',
+        items: [
+          {
+            productId: products[0]?.id || '',
+            qty: 1,
+            unitPrice: products[0]?.sellingPrice || 3500
+          }
+        ],
+        packagingCost: 0,
+        comboId: lastSale.itemId,
+        comboQty: Number(lastSale.qty) || 1,
+        comboSellingPrice: price
+      });
+    } else {
+      let itemsList: SaleItemEntry[] = [];
+      let pkg = 0;
+      if (lastSale.items && lastSale.items.length > 0) {
+        itemsList = lastSale.items.map(it => ({
+          productId: it.productId,
+          qty: Number(it.qty) || 1,
+          unitPrice: Number(it.unitPrice) >= 0 ? Number(it.unitPrice) : 0
+        }));
+        pkg = lastSale.packagingCost !== undefined ? Number(lastSale.packagingCost) : 0;
+      } else {
+        const p = products.find(prod => prod.id === lastSale.itemId);
+        itemsList = [
+          {
+            productId: lastSale.itemId || products[0]?.id || '',
+            qty: Number(lastSale.qty) || 1,
+            unitPrice: Number(lastSale.sellingPrice) >= 0 ? Number(lastSale.sellingPrice) : (p?.sellingPrice || 3500)
+          }
+        ];
+        pkg = lastSale.packagingCost !== undefined ? Number(lastSale.packagingCost) : (p?.packagingCost || 200);
+      }
+
+      setNewSale({
+        date: new Date().toISOString().slice(0, 10),
+        type: 'single',
+        itemId: itemsList[0]?.productId || products[0]?.id || '',
+        qty: itemsList.reduce((acc, it) => acc + (Number(it.qty) || 0), 0),
+        sellingPrice: itemsList[0]?.unitPrice || 0,
+        customer: lastSale.customer || '',
+        channel: lastSale.channel || 'Instagram DM',
+        items: itemsList,
+        packagingCost: pkg,
+        comboId: combos[0]?.id || '',
+        comboQty: 1,
+        comboSellingPrice: combos[0] ? getComboCostBreakdown(combos[0]).finalSellingPrice : 5400
+      });
+    }
     setShowAddSaleModal(true);
   };
 
   const handleCloseSaleModal = () => {
     setShowAddSaleModal(false);
     setEditingSaleId(null);
+    const firstProd = products[0];
+    const defaultPkg = firstProd?.packagingCost !== undefined ? Number(firstProd.packagingCost) : 200;
     setNewSale({
       date: new Date().toISOString().slice(0, 10),
       type: 'single',
-      itemId: products[0]?.id || '',
+      itemId: firstProd?.id || '',
       qty: 1,
-      sellingPrice: products[0]?.sellingPrice || 3500,
+      sellingPrice: firstProd?.sellingPrice || 3500,
       customer: '',
-      channel: 'Instagram DM'
+      channel: 'Instagram DM',
+      items: [
+        {
+          productId: firstProd?.id || '',
+          qty: 1,
+          unitPrice: firstProd?.sellingPrice || 3500
+        }
+      ],
+      packagingCost: defaultPkg,
+      comboId: combos[0]?.id || '',
+      comboQty: 1,
+      comboSellingPrice: combos[0] ? getComboCostBreakdown(combos[0]).finalSellingPrice : 5400
     });
   };
 
@@ -841,42 +1001,102 @@ export default function App({ data, updateItem }: AppProps = {}) {
 
   const handleSaveSale = (e: React.FormEvent) => {
     e.preventDefault();
-    const itemId = newSale.itemId || (newSale.type === 'single' ? products[0]?.id : combos[0]?.id) || '';
-    if (!itemId) return;
+    let savedSale: SaleRecord;
 
-    if (editingSaleId) {
-      const updatedSale: SaleRecord = {
-        id: editingSaleId,
-        date: newSale.date || new Date().toISOString().slice(0, 10),
-        type: newSale.type,
-        itemId: itemId,
-        qty: Math.max(1, Number(newSale.qty) || 1),
-        sellingPrice: Number(newSale.sellingPrice) >= 0 ? Number(newSale.sellingPrice) : 0,
-        customer: newSale.customer.trim() || 'Direct Customer',
-        channel: newSale.channel || 'Instagram DM'
-      };
-
-      setSales(prev => prev.map(s => s.id === editingSaleId ? updatedSale : s));
-    } else {
-      // Generate unique ID across all records
-      const maxNum = sales.reduce((max, s) => {
+    const getNextSaleNumber = () => {
+      return sales.reduce((max, s) => {
         const num = parseInt(s.id.replace(/\D/g, ''), 10);
         return !isNaN(num) && num > max ? num : max;
-      }, 0);
-      const newId = `SAL-${String(maxNum + 1).padStart(3, '0')}`;
+      }, 0) + 1;
+    };
 
-      const createdFinal: SaleRecord = {
-        id: newId,
-        date: newSale.date || new Date().toISOString().slice(0, 10),
-        type: newSale.type,
-        itemId: itemId,
-        qty: Math.max(1, Number(newSale.qty) || 1),
-        sellingPrice: Number(newSale.sellingPrice) >= 0 ? Number(newSale.sellingPrice) : 0,
-        customer: newSale.customer.trim() || 'Direct Customer',
-        channel: newSale.channel || 'Instagram DM'
-      };
+    if (newSale.type === 'combo') {
+      const comboId = newSale.comboId || newSale.itemId || combos[0]?.id || '';
+      if (!comboId) return;
+      const qty = Math.max(1, Number(newSale.comboQty || newSale.qty) || 1);
+      const price = Number(newSale.comboSellingPrice !== undefined ? newSale.comboSellingPrice : newSale.sellingPrice) >= 0
+        ? Number(newSale.comboSellingPrice !== undefined ? newSale.comboSellingPrice : newSale.sellingPrice)
+        : 0;
 
-      setSales(prev => [createdFinal, ...prev]);
+      if (editingSaleId) {
+        savedSale = {
+          id: editingSaleId,
+          date: newSale.date || new Date().toISOString().slice(0, 10),
+          type: 'combo',
+          itemId: comboId,
+          qty: qty,
+          sellingPrice: price,
+          customer: newSale.customer.trim() || 'Direct Customer',
+          channel: newSale.channel || 'Instagram DM'
+        };
+        setSales(prev => prev.map(s => s.id === editingSaleId ? savedSale : s));
+      } else {
+        const newId = `SAL-${String(getNextSaleNumber()).padStart(3, '0')}`;
+        savedSale = {
+          id: newId,
+          date: newSale.date || new Date().toISOString().slice(0, 10),
+          type: 'combo',
+          itemId: comboId,
+          qty: qty,
+          sellingPrice: price,
+          customer: newSale.customer.trim() || 'Direct Customer',
+          channel: newSale.channel || 'Instagram DM'
+        };
+        setSales(prev => [savedSale, ...prev]);
+      }
+    } else {
+      const validItems = (newSale.items || []).filter((it: any) => it.productId && Number(it.qty) > 0);
+      if (validItems.length === 0) {
+        const fallbackId = newSale.itemId || products[0]?.id || '';
+        if (!fallbackId) return;
+        validItems.push({
+          productId: fallbackId,
+          qty: Math.max(1, Number(newSale.qty) || 1),
+          unitPrice: Number(newSale.sellingPrice) >= 0 ? Number(newSale.sellingPrice) : 3500
+        });
+      }
+
+      const totalQty = validItems.reduce((acc: number, it: any) => acc + (Number(it.qty) || 0), 0);
+      const totalRev = validItems.reduce((acc: number, it: any) => acc + (Number(it.qty) || 0) * (Number(it.unitPrice) || 0), 0);
+      const avgPrice = totalQty > 0 ? totalRev / totalQty : 0;
+      const pkgCost = Math.max(0, Number(newSale.packagingCost) || 0);
+
+      const itemsPayload: SaleItemEntry[] = validItems.map((it: any) => ({
+        productId: it.productId,
+        qty: Number(it.qty) || 1,
+        unitPrice: Number(it.unitPrice) >= 0 ? Number(it.unitPrice) : 0
+      }));
+
+      if (editingSaleId) {
+        savedSale = {
+          id: editingSaleId,
+          date: newSale.date || new Date().toISOString().slice(0, 10),
+          type: 'single',
+          itemId: validItems[0].productId,
+          qty: totalQty,
+          sellingPrice: avgPrice,
+          items: itemsPayload,
+          packagingCost: pkgCost,
+          customer: newSale.customer.trim() || 'Direct Customer',
+          channel: newSale.channel || 'Instagram DM'
+        };
+        setSales(prev => prev.map(s => s.id === editingSaleId ? savedSale : s));
+      } else {
+        const newId = `SAL-${String(getNextSaleNumber()).padStart(3, '0')}`;
+        savedSale = {
+          id: newId,
+          date: newSale.date || new Date().toISOString().slice(0, 10),
+          type: 'single',
+          itemId: validItems[0].productId,
+          qty: totalQty,
+          sellingPrice: avgPrice,
+          items: itemsPayload,
+          packagingCost: pkgCost,
+          customer: newSale.customer.trim() || 'Direct Customer',
+          channel: newSale.channel || 'Instagram DM'
+        };
+        setSales(prev => [savedSale, ...prev]);
+      }
     }
 
     // Ensure the sale date is visible even if the active date filter was narrower
@@ -1222,6 +1442,7 @@ export default function App({ data, updateItem }: AppProps = {}) {
         products={products}
         combos={combos}
         getComboCostBreakdown={getComboCostBreakdown}
+        getProductCostBreakdown={getProductCostBreakdown}
       />
     </div>
   );

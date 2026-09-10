@@ -45,15 +45,25 @@ export interface BatchOrder {
   status?: 'Active' | 'Depleted';
 }
 
+export interface SaleItemEntry {
+  productId: string;
+  qty: number;
+  unitPrice: number;
+}
+
 export interface SaleRecord {
   id: string;
   date: string;
   type: 'single' | 'combo';
-  itemId: string;
-  qty: number;
-  sellingPrice: number;
+  itemId: string; // for backward compatibility: primary productId or comboId
+  qty: number; // total units in sale
+  sellingPrice: number; // primary unit price or average unit price
   customer?: string;
   channel?: string;
+  // Multi-product sale and order-level packaging:
+  items?: SaleItemEntry[];
+  packagingCost?: number;
+  notes?: string;
 }
 
 export interface InventoryStockItem {
@@ -68,6 +78,71 @@ export interface InventoryStockItem {
 export const formatNaira = (val: number | string | undefined | null) => {
   const num = Number(val) || 0;
   return '₦' + num.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
+
+// Universal helper functions for SaleRecord (guarantees 100% backward compatibility)
+export const getSaleTotalRevenue = (sale: SaleRecord): number => {
+  if (sale.items && sale.items.length > 0) {
+    return sale.items.reduce((sum, it) => sum + (Number(it.qty) || 0) * (Number(it.unitPrice) || 0), 0);
+  }
+  return (Number(sale.qty) || 0) * (Number(sale.sellingPrice) || 0);
+};
+
+export const getSaleTotalQty = (sale: SaleRecord): number => {
+  if (sale.items && sale.items.length > 0) {
+    return sale.items.reduce((sum, it) => sum + (Number(it.qty) || 0), 0);
+  }
+  return Number(sale.qty) || 0;
+};
+
+export const getSaleCost = (
+  sale: SaleRecord,
+  products: ProductItem[],
+  combos: ComboItem[]
+): number => {
+  if (sale.type === 'combo') {
+    const cmb = combos.find(c => c.id === sale.itemId);
+    if (!cmb) return 0;
+    let itemsCost = 0;
+    (cmb.items || []).forEach(ci => {
+      const p = products.find(prod => prod.id === ci.productId);
+      if (p) itemsCost += (Number(p.unitLandedCost) || 0) * ci.qty;
+    });
+    const comboPkg = Number(cmb.comboPackagingCost) || 0;
+    const gift = Number(cmb.giftCost) || 0;
+    return (itemsCost + comboPkg + gift) * (Number(sale.qty) || 1);
+  }
+
+  // Multi-item or modern single item with items array
+  if (sale.items && sale.items.length > 0) {
+    let itemsBaseCost = 0;
+    let fallbackPackaging = 0;
+    sale.items.forEach(it => {
+      const p = products.find(prod => prod.id === it.productId);
+      if (p) {
+        const itemQty = Number(it.qty) || 0;
+        const baseCostPerUnit = (Number(p.unitLandedCost) || 0) + (Number(p.giftCost) || 0) + (Number(p.miscCost) || 0);
+        itemsBaseCost += baseCostPerUnit * itemQty;
+        fallbackPackaging += (Number(p.packagingCost) || 0) * itemQty;
+      }
+    });
+    const packaging = sale.packagingCost !== undefined ? (Number(sale.packagingCost) || 0) : fallbackPackaging;
+    return itemsBaseCost + packaging;
+  }
+
+  // Legacy single sale without items array:
+  const prod = products.find(p => p.id === sale.itemId);
+  if (!prod) return 0;
+  const unitCost = (Number(prod.unitLandedCost) || 0) + (Number(prod.packagingCost) || 0) + (Number(prod.giftCost) || 0) + (Number(prod.miscCost) || 0);
+  return unitCost * (Number(sale.qty) || 0);
+};
+
+export const getSaleProfit = (
+  sale: SaleRecord,
+  products: ProductItem[],
+  combos: ComboItem[]
+): number => {
+  return getSaleTotalRevenue(sale) - getSaleCost(sale, products, combos);
 };
 
 export const INITIAL_PRODUCTS: ProductItem[] = [

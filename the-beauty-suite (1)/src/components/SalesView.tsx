@@ -1,6 +1,14 @@
 import React, { useState } from 'react';
-import { ShoppingBag, Plus, Search, Trash2, Pencil, RotateCcw, FileText, FilterX, AlertCircle } from 'lucide-react';
-import { SaleRecord, ProductItem, ComboItem, formatNaira } from '../types';
+import { ShoppingBag, Plus, Search, Trash2, Pencil, RotateCcw, FileText, FilterX, AlertCircle, Package } from 'lucide-react';
+import {
+  SaleRecord,
+  ProductItem,
+  ComboItem,
+  formatNaira,
+  getSaleTotalRevenue,
+  getSaleTotalQty,
+  getSaleProfit as calculateSaleProfit
+} from '../types';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 interface SalesViewProps {
@@ -45,26 +53,24 @@ export const SalesView: React.FC<SalesViewProps> = ({
     );
   });
 
-  const getItemName = (sale: SaleRecord) => {
-    if (sale.type === 'single') {
-      const prod = products.find(p => p.id === sale.itemId);
-      return prod ? prod.name : 'Unknown Product';
-    } else {
+  const getItemSummary = (sale: SaleRecord) => {
+    if (sale.type === 'combo') {
       const cmb = combos.find(c => c.id === sale.itemId);
       return cmb ? cmb.name : 'Unknown Bundle';
     }
+    if (sale.items && sale.items.length > 0) {
+      if (sale.items.length === 1) {
+        const prod = products.find(p => p.id === sale.items![0].productId);
+        return prod ? prod.name : 'Unknown Product';
+      }
+      return `${sale.items.length} Products Order`;
+    }
+    const prod = products.find(p => p.id === sale.itemId);
+    return prod ? prod.name : 'Unknown Product';
   };
 
   const getSaleProfit = (sale: SaleRecord) => {
-    const qty = Number(sale.qty) || 0;
-    const unitPrice = Number(sale.sellingPrice) || 0;
-    if (sale.type === 'single') {
-      const prod = products.find(p => p.id === sale.itemId);
-      return prod ? (unitPrice - getProductCostBreakdown(prod).totalCost) * qty : 0;
-    } else {
-      const cmb = combos.find(c => c.id === sale.itemId);
-      return cmb ? (unitPrice - getComboCostBreakdown(cmb).totalCost) * qty : 0;
-    }
+    return calculateSaleProfit(sale, products, combos);
   };
 
   const isFilterActive = filteredSales.length !== sales.length;
@@ -78,7 +84,7 @@ export const SalesView: React.FC<SalesViewProps> = ({
             Sales Transactions Log
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Real-time orders log, multi-channel tracking (Snapchat, IG, WhatsApp, Website, Pop-ups), and automated stock deductions.
+            Real-time orders log, multi-product carts, order-level packaging, and automated stock deductions.
           </p>
         </div>
         <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
@@ -177,11 +183,10 @@ export const SalesView: React.FC<SalesViewProps> = ({
             </div>
           ) : (
             displaySales.map((sale) => {
-              const qty = Number(sale.qty) || 0;
-              const unitPrice = Number(sale.sellingPrice) || 0;
-              const totalRev = qty * unitPrice;
+              const totalQty = getSaleTotalQty(sale);
+              const totalRev = getSaleTotalRevenue(sale);
               const netProfit = getSaleProfit(sale);
-              const itemName = getItemName(sale);
+              const isMultiItem = Boolean(sale.items && sale.items.length > 1);
 
               return (
                 <div key={sale.id} className="p-4 space-y-3 hover:bg-pink-50/20 transition-colors">
@@ -191,12 +196,39 @@ export const SalesView: React.FC<SalesViewProps> = ({
                         <span className="font-mono text-[10px] text-slate-400">{sale.id}</span>
                         <span className="text-xs text-slate-500 font-mono">{sale.date}</span>
                         <span className={`px-2 py-0.5 rounded-full text-[9px] font-semibold ${
-                          sale.type === 'combo' ? 'bg-pink-50 text-pink-700 border border-pink-200' : 'bg-slate-100 text-slate-700'
+                          sale.type === 'combo'
+                            ? 'bg-pink-50 text-pink-700 border border-pink-200'
+                            : isMultiItem
+                            ? 'bg-purple-50 text-purple-700 border border-purple-200'
+                            : 'bg-slate-100 text-slate-700'
                         }`}>
-                          {sale.type === 'combo' ? 'Bundle' : 'Single'}
+                          {sale.type === 'combo' ? 'Bundle' : isMultiItem ? 'Multi-Item' : 'Single'}
                         </span>
                       </div>
-                      <h4 className="font-bold text-slate-800 text-sm mt-1">{itemName}</h4>
+
+                      {/* Items Listing */}
+                      {sale.items && sale.items.length > 0 ? (
+                        <div className="mt-1.5 space-y-1">
+                          {sale.items.map((it, idx) => {
+                            const p = products.find(prod => prod.id === it.productId);
+                            return (
+                              <div key={idx} className="flex items-center gap-1.5 text-xs text-slate-800">
+                                <span className="font-bold">{p?.name || 'Product'}</span>
+                                <span className="text-pink-600 font-mono font-semibold text-[11px]">×{it.qty}</span>
+                                <span className="text-slate-400 text-[10px]">({formatNaira(it.unitPrice)})</span>
+                              </div>
+                            );
+                          })}
+                          {sale.packagingCost !== undefined && sale.packagingCost > 0 && (
+                            <div className="text-[10px] text-pink-600 font-medium flex items-center gap-1 mt-0.5">
+                              <Package className="w-3 h-3" />
+                              <span>Packaging: {formatNaira(sale.packagingCost)}</span>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <h4 className="font-bold text-slate-800 text-sm mt-1">{getItemSummary(sale)}</h4>
+                      )}
                     </div>
 
                     {/* Touch-Friendly Action Buttons */}
@@ -239,7 +271,7 @@ export const SalesView: React.FC<SalesViewProps> = ({
                         {sale.channel || 'Direct'}
                       </span>
                     </div>
-                    <span className="font-semibold text-slate-700">{qty} unit(s) × {formatNaira(unitPrice)}</span>
+                    <span className="font-semibold text-slate-700">{totalQty} total unit(s)</span>
                   </div>
 
                   <div className="bg-slate-50 rounded-xl p-2.5 flex items-center justify-between text-xs border border-slate-100">
@@ -264,7 +296,7 @@ export const SalesView: React.FC<SalesViewProps> = ({
             <thead className="bg-slate-50 border-b border-slate-200/80 text-slate-500 font-semibold uppercase text-[10px] tracking-wider">
               <tr>
                 <th className="py-3 px-4">Date</th>
-                <th className="py-3 px-4">Item Sold</th>
+                <th className="py-3 px-4">Item(s) Sold</th>
                 <th className="py-3 px-4">Type</th>
                 <th className="py-3 px-4">Customer / Channel</th>
                 <th className="py-3 px-4 text-right">Qty</th>
@@ -296,21 +328,55 @@ export const SalesView: React.FC<SalesViewProps> = ({
                 </tr>
               ) : (
                 displaySales.map((sale) => {
-                  const qty = Number(sale.qty) || 0;
-                  const unitPrice = Number(sale.sellingPrice) || 0;
-                  const totalRev = qty * unitPrice;
+                  const totalQty = getSaleTotalQty(sale);
+                  const totalRev = getSaleTotalRevenue(sale);
                   const netProfit = getSaleProfit(sale);
-                  const itemName = getItemName(sale);
+                  const isMultiItem = Boolean(sale.items && sale.items.length > 1);
 
                   return (
                     <tr key={sale.id} className="hover:bg-pink-50/20 transition-colors">
                       <td className="py-3 px-4 font-mono font-medium text-slate-600">{sale.date}</td>
-                      <td className="py-3 px-4 font-semibold text-slate-800">{itemName}</td>
+                      <td className="py-3 px-4">
+                        {sale.type === 'combo' ? (
+                          <div>
+                            <span className="font-semibold text-slate-800">{getItemSummary(sale)}</span>
+                          </div>
+                        ) : sale.items && sale.items.length > 0 ? (
+                          <div className="space-y-1 max-w-xs">
+                            {sale.items.map((it, idx) => {
+                              const p = products.find(prod => prod.id === it.productId);
+                              return (
+                                <div key={idx} className="flex items-center gap-1.5 text-xs text-slate-800">
+                                  <span className="font-semibold">{p?.name || 'Product'}</span>
+                                  <span className="text-pink-600 font-mono font-bold text-[11px]">×{it.qty}</span>
+                                  {sale.items!.length > 1 && (
+                                    <span className="text-slate-400 text-[10px]">({formatNaira(it.unitPrice)})</span>
+                                  )}
+                                </div>
+                              );
+                            })}
+                            {sale.packagingCost !== undefined && sale.packagingCost > 0 && (
+                              <div className="text-[10px] text-pink-600 font-medium flex items-center gap-1">
+                                <Package className="w-3 h-3" />
+                                <span>Packaging: {formatNaira(sale.packagingCost)}</span>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div>
+                            <span className="font-semibold text-slate-800">{getItemSummary(sale)}</span>
+                          </div>
+                        )}
+                      </td>
                       <td className="py-3 px-4">
                         <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-semibold ${
-                          sale.type === 'combo' ? 'bg-pink-50 text-pink-700 border border-pink-200' : 'bg-slate-100 text-slate-700'
+                          sale.type === 'combo'
+                            ? 'bg-pink-50 text-pink-700 border border-pink-200'
+                            : isMultiItem
+                            ? 'bg-purple-50 text-purple-700 border border-purple-200'
+                            : 'bg-slate-100 text-slate-700'
                         }`}>
-                          {sale.type === 'combo' ? 'Bundle Combo' : 'Single SKU'}
+                          {sale.type === 'combo' ? 'Bundle Combo' : isMultiItem ? 'Multi-Item' : 'Single SKU'}
                         </span>
                       </td>
                       <td className="py-3 px-4">
@@ -327,8 +393,14 @@ export const SalesView: React.FC<SalesViewProps> = ({
                           {sale.channel || 'Direct'}
                         </span>
                       </td>
-                      <td className="py-3 px-4 text-right font-bold text-slate-800">{qty}</td>
-                      <td className="py-3 px-4 text-right text-slate-600">{formatNaira(unitPrice)}</td>
+                      <td className="py-3 px-4 text-right font-bold text-slate-800">{totalQty}</td>
+                      <td className="py-3 px-4 text-right text-slate-600">
+                        {isMultiItem ? (
+                          <span title="Weighted average selling price">Avg. {formatNaira(sale.sellingPrice)}</span>
+                        ) : (
+                          formatNaira(sale.sellingPrice)
+                        )}
+                      </td>
                       <td className="py-3 px-4 text-right font-bold text-slate-800">{formatNaira(totalRev)}</td>
                       <td className="py-3 px-4 text-right font-bold text-emerald-600">{formatNaira(netProfit)}</td>
                       <td className="py-3 px-4 text-center">
@@ -373,10 +445,10 @@ export const SalesView: React.FC<SalesViewProps> = ({
           details={[
             { label: 'Transaction ID', value: saleToDelete.id },
             { label: 'Date', value: saleToDelete.date },
-            { label: 'Item', value: getItemName(saleToDelete) },
-            { label: 'Quantity', value: `${saleToDelete.qty} unit(s)` },
+            { label: 'Item(s)', value: getItemSummary(saleToDelete) },
+            { label: 'Quantity', value: `${getSaleTotalQty(saleToDelete)} unit(s)` },
             { label: 'Customer / Channel', value: `${saleToDelete.customer || 'Direct'} (${saleToDelete.channel})` },
-            { label: 'Total Revenue', value: formatNaira(Number(saleToDelete.qty) * Number(saleToDelete.sellingPrice)), highlight: true },
+            { label: 'Total Revenue', value: formatNaira(getSaleTotalRevenue(saleToDelete)), highlight: true },
             { label: 'Net Profit', value: formatNaira(getSaleProfit(saleToDelete)) }
           ]}
           confirmText="Delete Sale Record"

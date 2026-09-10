@@ -1,6 +1,16 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { ProductItem, ComboItem, BatchOrder, SaleRecord, InventoryStockItem } from '../types';
+import {
+  ProductItem,
+  ComboItem,
+  BatchOrder,
+  SaleRecord,
+  InventoryStockItem,
+  getSaleTotalRevenue,
+  getSaleTotalQty,
+  getSaleCost,
+  getSaleProfit
+} from '../types';
 import { UserProfile } from './auth';
 import { AccentPresetId, getSavedThemePreset } from './theme';
 
@@ -367,29 +377,31 @@ export const generateBusinessReportPDF = (
       const skuMap: Record<string, { name: string; count: number }> = {};
 
       list.forEach(s => {
-        const qty = Number(s.qty) || 0;
-        const r = qty * (Number(s.sellingPrice) || 0);
+        const qty = getSaleTotalQty(s);
+        const r = getSaleTotalRevenue(s);
+        const c = getSaleCost(s, products, combos);
         rev += r;
         itemsCount += qty;
+        cost += c;
 
-        let c = 0;
-        let itemName = 'Unknown';
-        if (s.type === 'single') {
+        if (s.type === 'single' && s.items && s.items.length > 0) {
+          s.items.forEach(it => {
+            const p = products.find(prod => prod.id === it.productId);
+            const name = p ? p.name : 'Product';
+            if (!skuMap[it.productId]) skuMap[it.productId] = { name, count: 0 };
+            skuMap[it.productId].count += Number(it.qty) || 0;
+          });
+        } else if (s.type === 'single') {
           const p = products.find(prod => prod.id === s.itemId);
-          if (p) {
-            itemName = p.name;
-            c = getProductCostBreakdown(p).totalCost * qty;
-          }
+          const name = p ? p.name : 'Product';
+          if (!skuMap[s.itemId]) skuMap[s.itemId] = { name, count: 0 };
+          skuMap[s.itemId].count += qty;
         } else {
           const combo = combos.find(cmb => cmb.id === s.itemId);
-          if (combo) {
-            itemName = combo.name;
-            c = getComboCostBreakdown(combo).totalCost * qty;
-          }
+          const name = combo ? combo.name : 'Bundle';
+          if (!skuMap[s.itemId]) skuMap[s.itemId] = { name, count: 0 };
+          skuMap[s.itemId].count += qty;
         }
-        cost += c;
-        if (!skuMap[s.itemId]) skuMap[s.itemId] = { name: itemName, count: 0 };
-        skuMap[s.itemId].count += qty;
       });
 
       const netProfit = rev - cost;
@@ -626,20 +638,12 @@ export const generateBusinessReportPDF = (
     sales.forEach(s => {
       const ch = s.channel || 'Direct / Walk-In';
       if (!channelStats[ch]) channelStats[ch] = { count: 0, revenue: 0, profit: 0 };
-      const qty = Number(s.qty) || 0;
-      const unitPrice = Number(s.sellingPrice) || 0;
-      const rev = qty * unitPrice;
-      let cost = 0;
-      if (s.type === 'single') {
-        const prod = products.find(p => p.id === s.itemId);
-        if (prod) cost = getProductCostBreakdown(prod).totalCost * qty;
-      } else {
-        const cmb = combos.find(c => c.id === s.itemId);
-        if (cmb) cost = getComboCostBreakdown(cmb).totalCost * qty;
-      }
+      const qty = getSaleTotalQty(s);
+      const rev = getSaleTotalRevenue(s);
+      const profit = getSaleProfit(s, products, combos);
       channelStats[ch].count += qty;
       channelStats[ch].revenue += rev;
-      channelStats[ch].profit += (rev - cost);
+      channelStats[ch].profit += profit;
     });
 
     const channelRows = Object.entries(channelStats).map(([channel, stat]) => {
@@ -700,35 +704,45 @@ export const generateBusinessReportPDF = (
 
     const salesRows = sales.map(s => {
       let itemName = 'Unknown';
-      let unitCost = 0;
-      if (s.type === 'single') {
-        const prod = products.find(p => p.id === s.itemId);
-        if (prod) {
-          itemName = prod.name;
-          unitCost = getProductCostBreakdown(prod).totalCost;
+      if (s.type === 'combo') {
+        const cmb = combos.find(c => c.id === s.itemId);
+        if (cmb) itemName = cmb.name;
+      } else if (s.items && s.items.length > 0) {
+        if (s.items.length === 1) {
+          const prod = products.find(p => p.id === s.items![0].productId);
+          itemName = prod ? prod.name : 'Product';
+        } else {
+          const names = s.items.map(it => {
+            const p = products.find(prod => prod.id === it.productId);
+            return `${it.qty}x ${p ? p.name : 'Product'}`;
+          }).join(', ');
+          itemName = `${s.items.length} Items (${names})`;
         }
       } else {
-        const cmb = combos.find(c => c.id === s.itemId);
-        if (cmb) {
-          itemName = cmb.name;
-          unitCost = getComboCostBreakdown(cmb).totalCost;
-        }
+        const prod = products.find(p => p.id === s.itemId);
+        if (prod) itemName = prod.name;
       }
 
-      const qty = Number(s.qty) || 0;
-      const unitPrice = Number(s.sellingPrice) || 0;
-      const totalRev = qty * unitPrice;
-      const netProfit = (unitPrice - unitCost) * qty;
+      if (s.packagingCost !== undefined && s.packagingCost > 0) {
+        itemName += ` [Pkg: ${formatPDFCurrency(s.packagingCost)}]`;
+      }
+
+      const isMulti = Boolean(s.items && s.items.length > 1);
+      const typeLabel = s.type === 'combo' ? 'Bundle' : isMulti ? 'Multi-Item' : 'Single';
+      const qty = getSaleTotalQty(s);
+      const totalRev = getSaleTotalRevenue(s);
+      const netProfit = getSaleProfit(s, products, combos);
+      const unitPriceDisplay = isMulti ? `Avg. ${formatPDFCurrency(s.sellingPrice)}` : formatPDFCurrency(s.sellingPrice);
 
       return [
         s.date,
         s.id,
         itemName,
-        s.type === 'combo' ? 'Bundle' : 'Single',
+        typeLabel,
         s.customer || 'Direct',
         s.channel || 'Direct',
         qty.toString(),
-        formatPDFCurrency(unitPrice),
+        unitPriceDisplay,
         formatPDFCurrency(totalRev),
         formatPDFCurrency(netProfit)
       ];
