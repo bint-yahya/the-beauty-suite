@@ -1,0 +1,8 @@
+{
+  "name": "the beauty suite",
+  "description": "360° Operations, Batch Costing & Inventory Tracker for beauty and cosmetic brands with automated landed cost calculations and bundle pricing.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
