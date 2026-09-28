@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Trash2, Tag, Pencil, AlertCircle, FilterX, Package } from 'lucide-react';
+import { Plus, Trash2, Tag, Pencil, AlertCircle, FilterX, Package, Archive, ArchiveRestore } from 'lucide-react';
 import { ProductItem, formatNaira } from '../types';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
@@ -10,6 +10,7 @@ interface ProductsViewProps {
   selectedProductFilter?: string;
   onResetFilters?: () => void;
   onDeleteProduct: (id: string, name: string) => void;
+  onArchiveProduct?: (id: string, isArchived: boolean) => void;
   onOpenAddProduct: () => void;
   onEditProduct: (product: ProductItem) => void;
   getProductCostBreakdown: (p: ProductItem) => any;
@@ -22,11 +23,22 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
   selectedProductFilter = 'all',
   onResetFilters,
   onDeleteProduct,
+  onArchiveProduct,
   onOpenAddProduct,
   onEditProduct,
   getProductCostBreakdown
 }) => {
   const [productToDelete, setProductToDelete] = useState<ProductItem | null>(null);
+  const [lifecycleFilter, setLifecycleFilter] = useState<'active' | 'archived' | 'all'>('active');
+
+  const activeCount = products.filter(p => !p.isArchived).length;
+  const archivedCount = products.filter(p => p.isArchived).length;
+
+  const displayedProducts = products.filter(p => {
+    if (lifecycleFilter === 'active') return !p.isArchived;
+    if (lifecycleFilter === 'archived') return Boolean(p.isArchived);
+    return true;
+  });
 
   const isFilterActive = (totalCount !== undefined && totalCount !== products.length) ||
     selectedCategory !== 'all' ||
@@ -41,7 +53,7 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
             Product Master Catalog
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Single beauty & lip care SKUs, landed purchase costs, custom packaging, and profit margins.
+            Single beauty & lip care SKUs, landed purchase costs, and profit margins.
           </p>
         </div>
         <button
@@ -52,6 +64,52 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
           <Plus className="w-4 h-4" />
           <span>Add New Product</span>
         </button>
+      </div>
+
+      {/* Lifecycle Filter Tabs: Active vs Archived */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-1.5 p-1 bg-slate-100/90 rounded-2xl w-fit border border-slate-200/60 shadow-2xs">
+          <button
+            type="button"
+            onClick={() => setLifecycleFilter('active')}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              lifecycleFilter === 'active'
+                ? 'bg-white text-pink-600 shadow-xs'
+                : 'text-slate-600 hover:text-slate-800'
+            }`}
+          >
+            Active Products ({activeCount})
+          </button>
+          <button
+            type="button"
+            onClick={() => setLifecycleFilter('archived')}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+              lifecycleFilter === 'archived'
+                ? 'bg-white text-amber-700 shadow-xs'
+                : 'text-slate-600 hover:text-slate-800'
+            }`}
+          >
+            <Archive className="w-3.5 h-3.5 text-amber-600" />
+            <span>Archived / Discontinued ({archivedCount})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setLifecycleFilter('all')}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              lifecycleFilter === 'all'
+                ? 'bg-white text-slate-800 shadow-xs'
+                : 'text-slate-600 hover:text-slate-800'
+            }`}
+          >
+            All ({products.length})
+          </button>
+        </div>
+
+        {archivedCount > 0 && lifecycleFilter === 'active' && (
+          <span className="text-[11px] text-slate-500">
+            {archivedCount} product{archivedCount === 1 ? '' : 's'} archived (hidden from sales dropdowns)
+          </span>
+        )}
       </div>
 
       {/* Notice banner if global Category or Product filter is applied */}
@@ -111,22 +169,45 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
           <>
             {/* Mobile View: Product SKU Cards (Hidden on sm screens and up) */}
             <div className="block sm:hidden divide-y divide-slate-100">
-          {products.map((prod) => {
+          {displayedProducts.map((prod) => {
             const costCalc = getProductCostBreakdown(prod);
             return (
-              <div key={prod.id} className="p-4 space-y-3 hover:bg-pink-50/20 transition-colors">
+              <div key={prod.id} className={`p-4 space-y-3 transition-colors ${prod.isArchived ? 'bg-amber-50/20' : 'hover:bg-pink-50/20'}`}>
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="font-mono text-xs font-bold text-pink-600 bg-pink-50 px-2 py-0.5 rounded border border-pink-200">
                         {prod.code}
                       </span>
                       <span className="text-xs text-slate-400 font-medium">{prod.category}</span>
+                      {prod.isArchived && (
+                        <span className="px-2 py-0.2 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200 inline-flex items-center gap-1">
+                          <Archive className="w-2.5 h-2.5" />
+                          <span>Archived</span>
+                        </span>
+                      )}
                     </div>
-                    <h3 className="font-bold text-slate-800 text-sm mt-1">{prod.name}</h3>
+                    <h3 className={`font-bold text-sm mt-1 ${prod.isArchived ? 'text-slate-500 italic' : 'text-slate-800'}`}>
+                      {prod.name}
+                    </h3>
                   </div>
 
                   <div className="flex items-center gap-1.5 shrink-0">
+                    {onArchiveProduct && (
+                      <button
+                        type="button"
+                        onClick={() => onArchiveProduct(prod.id, !prod.isArchived)}
+                        className={`p-2 rounded-xl border transition-colors cursor-pointer min-h-[38px] min-w-[38px] flex items-center justify-center ${
+                          prod.isArchived
+                            ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
+                            : 'bg-slate-50 text-slate-400 border-slate-200 hover:text-amber-600 hover:bg-amber-50 hover:border-amber-200'
+                        }`}
+                        title={prod.isArchived ? "Unarchive / Restore to active catalog" : "Archive product (hide from sales dropdowns)"}
+                        aria-label={prod.isArchived ? `Restore product ${prod.name}` : `Archive product ${prod.name}`}
+                      >
+                        {prod.isArchived ? <ArchiveRestore className="w-3.5 h-3.5" /> : <Archive className="w-3.5 h-3.5" />}
+                      </button>
+                    )}
                     <button
                       id={`btn-edit-product-mobile-${prod.id}`}
                       onClick={() => onEditProduct(prod)}
@@ -190,12 +271,23 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {products.map((prod) => {
+              {displayedProducts.map((prod) => {
                 const costCalc = getProductCostBreakdown(prod);
                 return (
-                  <tr key={prod.id} className="hover:bg-pink-50/30 transition-colors">
+                  <tr key={prod.id} className={`transition-colors ${prod.isArchived ? 'bg-amber-50/20 hover:bg-amber-50/30' : 'hover:bg-pink-50/30'}`}>
                     <td className="py-3 px-4 font-mono font-bold text-pink-600">{prod.code}</td>
-                    <td className="py-3 px-4 font-semibold text-slate-800">{prod.name}</td>
+                    <td className="py-3 px-4">
+                      <div className="flex items-center gap-2">
+                        <span className={`font-semibold ${prod.isArchived ? 'text-slate-500 italic' : 'text-slate-800'}`}>
+                          {prod.name}
+                        </span>
+                        {prod.isArchived && (
+                          <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                            Archived
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td className="py-3 px-4">
                       <span className="px-2.5 py-0.5 rounded-full text-[10px] font-medium bg-pink-50 text-pink-700 border border-pink-100">
                         {prod.category}
@@ -217,6 +309,21 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                     </td>
                     <td className="py-3 px-4 text-center">
                       <div className="flex items-center justify-center gap-1.5">
+                        {onArchiveProduct && (
+                          <button
+                            type="button"
+                            onClick={() => onArchiveProduct(prod.id, !prod.isArchived)}
+                            className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                              prod.isArchived
+                                ? 'text-amber-700 hover:bg-amber-100 bg-amber-50'
+                                : 'text-slate-400 hover:text-amber-600 hover:bg-amber-50'
+                            }`}
+                            title={prod.isArchived ? "Unarchive / Restore to active catalog" : "Archive product (hide from sales dropdowns)"}
+                            aria-label={prod.isArchived ? `Restore product ${prod.name}` : `Archive product ${prod.name}`}
+                          >
+                            {prod.isArchived ? <ArchiveRestore className="w-3.5 h-3.5" /> : <Archive className="w-3.5 h-3.5" />}
+                          </button>
+                        )}
                         <button
                           id={`btn-edit-product-${prod.id}`}
                           onClick={() => onEditProduct(prod)}
@@ -252,14 +359,26 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
         <ConfirmDeleteModal
           isOpen={true}
           title="Delete Catalog Product"
-          description={`Are you sure you want to remove "${productToDelete.name}" from your catalog?`}
+          description={
+            productToDelete.isArchived
+              ? `Permanently remove "${productToDelete.name}" from your catalog. Historical sales and batches will permanently snapshot this product's name and cost.`
+              : `Are you sure you want to remove "${productToDelete.name}"? You can also archive it instead so it disappears from sales dropdowns without affecting your records.`
+          }
           details={[
             { label: 'SKU Code', value: productToDelete.code },
             { label: 'Category', value: productToDelete.category },
+            { label: 'Status', value: productToDelete.isArchived ? 'Archived' : 'Active Catalog' },
             { label: 'Landed Unit Cost', value: formatNaira(productToDelete.unitLandedCost) },
             { label: 'Selling Price', value: formatNaira(productToDelete.sellingPrice), highlight: true }
           ]}
-          confirmText="Delete Product"
+          confirmText="Delete Permanently"
+          secondaryActionText={!productToDelete.isArchived && onArchiveProduct ? "Archive Product (Recommended)" : undefined}
+          onSecondaryAction={() => {
+            if (onArchiveProduct && productToDelete) {
+              onArchiveProduct(productToDelete.id, true);
+            }
+            setProductToDelete(null);
+          }}
           onConfirm={() => {
             const { id, name } = productToDelete;
             setProductToDelete(null);

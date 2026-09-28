@@ -14,6 +14,8 @@ interface ConfirmDeleteModalProps {
   details?: DetailItem[];
   confirmText?: string;
   cancelText?: string;
+  secondaryActionText?: string;
+  onSecondaryAction?: () => void;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -25,6 +27,8 @@ export const ConfirmDeleteModal: React.FC<ConfirmDeleteModalProps> = ({
   details = [],
   confirmText = 'Yes, Delete',
   cancelText = 'Cancel',
+  secondaryActionText,
+  onSecondaryAction,
   onConfirm,
   onCancel
 }) => {
@@ -73,19 +77,28 @@ export const ConfirmDeleteModal: React.FC<ConfirmDeleteModalProps> = ({
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-2 pt-2 border-t border-slate-100">
           <button
             type="button"
             onClick={onCancel}
-            className="px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold text-xs transition-colors cursor-pointer"
+            className="px-4 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold text-xs transition-colors cursor-pointer order-3 sm:order-1"
           >
             {cancelText}
           </button>
+          {secondaryActionText && onSecondaryAction && (
+            <button
+              type="button"
+              onClick={onSecondaryAction}
+              className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs shadow-xs shadow-amber-200 transition-all cursor-pointer order-2 active:scale-95"
+            >
+              {secondaryActionText}
+            </button>
+          )}
           <button
             id="btn-confirm-delete"
             type="button"
             onClick={onConfirm}
-            className="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-md shadow-rose-200 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+            className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-md shadow-rose-200 flex items-center justify-center gap-1.5 transition-all cursor-pointer order-1 sm:order-3 active:scale-95"
           >
             <Trash2 className="w-4 h-4" />
             <span>{confirmText}</span>

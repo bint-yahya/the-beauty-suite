@@ -5,16 +5,22 @@ import {
   BatchOrder,
   SaleRecord,
   SaleItemEntry,
+  SaleGift,
   InventoryStockItem,
+  PaymentStatus,
+  DeliveryStatus,
   getSaleTotalRevenue,
   getSaleTotalQty,
   getSaleCost,
   getSaleProfit,
+  getSaleGiftCost,
+  generateUniqueSKU,
+  SalesChannel,
+  DEFAULT_SALES_CHANNELS,
   INITIAL_PRODUCTS,
   INITIAL_COMBOS,
   INITIAL_BATCHES,
-  INITIAL_SALES,
-  DEFAULT_SALES_CHANNELS
+  INITIAL_SALES
 } from './types';
 import { HeaderNav, ActiveTabType } from './components/HeaderNav';
 import { FilterBar } from './components/FilterBar';
@@ -29,8 +35,8 @@ import { AuthView } from './components/AuthView';
 import { InteractiveTour } from './components/InteractiveTour';
 import { ExportReportModal } from './components/ExportReportModal';
 import { UserSettingsModal } from './components/UserSettingsModal';
+import { ManageSalesChannelsModal } from './components/ManageSalesChannelsModal';
 import { ConfirmDeleteModal } from './components/ConfirmDeleteModal';
-import { ManageChannelsModal } from './components/ManageChannelsModal';
 import { Modals } from './components/Modals';
 import {
   UserProfile,
@@ -63,9 +69,8 @@ const loadUserData = (userId?: string) => {
         combos: Array.isArray(parsed.combos) ? parsed.combos : INITIAL_COMBOS,
         batches: Array.isArray(parsed.batches) ? parsed.batches : INITIAL_BATCHES,
         sales: Array.isArray(parsed.sales) ? parsed.sales : INITIAL_SALES,
-        salesChannels: Array.isArray(parsed.salesChannels) && parsed.salesChannels.length > 0
-          ? parsed.salesChannels
-          : DEFAULT_SALES_CHANNELS
+        salesChannels: Array.isArray(parsed.salesChannels) && parsed.salesChannels.length > 0 ? parsed.salesChannels : DEFAULT_SALES_CHANNELS,
+        deletedProducts: Array.isArray(parsed.deletedProducts) ? parsed.deletedProducts : []
       };
     }
   } catch (e) {
@@ -76,7 +81,8 @@ const loadUserData = (userId?: string) => {
     combos: INITIAL_COMBOS,
     batches: INITIAL_BATCHES,
     sales: INITIAL_SALES,
-    salesChannels: DEFAULT_SALES_CHANNELS
+    salesChannels: DEFAULT_SALES_CHANNELS,
+    deletedProducts: []
   };
 };
 
@@ -111,26 +117,146 @@ export default function App({ data, updateItem }: AppProps = {}) {
   const [selectedTimePreset, setSelectedTimePreset] = useState('all');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [selectedProductFilter, setSelectedProductFilter] = useState('all');
-  const [selectedChannelFilter, setSelectedChannelFilter] = useState('all');
 
   // Core application state initialized from scoped user storage
   const initialData = useMemo(() => loadUserData(currentUser?.id), [currentUser?.id]);
   const [products, setProducts] = useState<ProductItem[]>(initialData.products);
+  const [deletedProducts, setDeletedProducts] = useState<ProductItem[]>(initialData.deletedProducts || []);
   const [combos, setCombos] = useState<ComboItem[]>(initialData.combos);
   const [batches, setBatches] = useState<BatchOrder[]>(initialData.batches);
   const [sales, setSales] = useState<SaleRecord[]>(initialData.sales);
-  const [salesChannels, setSalesChannels] = useState<string[]>(initialData.salesChannels || DEFAULT_SALES_CHANNELS);
+  const [salesChannels, setSalesChannels] = useState<SalesChannel[]>(initialData.salesChannels);
+  const [showChannelsModal, setShowChannelsModal] = useState(false);
+
+  // All known products (active + archived + deleted snapshot) to guarantee historical sales and batches never break
+  const allKnownProducts = useMemo(() => {
+    const map = new Map<string, ProductItem>();
+    (deletedProducts || []).forEach(p => map.set(p.id, p));
+    products.forEach(p => map.set(p.id, p));
+    return Array.from(map.values());
+  }, [products, deletedProducts]);
 
   // Keep local user-scoped storage in sync
   useEffect(() => {
     if (!currentUser?.id) return;
     const key = `glow_care_data_${currentUser.id}`;
     try {
-      localStorage.setItem(key, JSON.stringify({ products, combos, batches, sales, salesChannels }));
+      localStorage.setItem(key, JSON.stringify({ products, combos, batches, sales, salesChannels, deletedProducts }));
     } catch (e) {
       console.error('Error saving user data', e);
     }
-  }, [products, combos, batches, sales, salesChannels, currentUser?.id]);
+  }, [products, combos, batches, sales, salesChannels, deletedProducts, currentUser?.id]);
+
+  // Sales Channel Management Handlers
+  const handleAddChannel = (channelData: Omit<SalesChannel, 'id'>): string => {
+    const newId = `chan-${Date.now()}`;
+    const newCh: SalesChannel = {
+      id: newId,
+      ...channelData
+    };
+    setSalesChannels(prev => [...prev, newCh]);
+    return newCh.name;
+  };
+
+  const handleUpdateChannel = (
+    id: string,
+    updated: Partial<SalesChannel>,
+    oldName: string,
+    updateSalesCascade?: boolean
+  ) => {
+    setSalesChannels(prev =>
+      prev.map(ch => (ch.id === id ? { ...ch, ...updated } : ch))
+    );
+    if (updateSalesCascade && updated.name && updated.name !== oldName) {
+      const newName = updated.name;
+      setSales(prev =>
+        prev.map(s => (s.channel === oldName ? { ...s, channel: newName } : s))
+      );
+      setNewSale(prev => (prev.channel === oldName ? { ...prev, channel: newName } : prev));
+    }
+  };
+
+  const handleDeleteChannel = (id: string, channelName: string, reassignToName?: string | null) => {
+    setSalesChannels(prev => prev.filter(ch => ch.id !== id));
+    // If a reassign target was explicitly provided, reassign past sales; otherwise keep past sales tagged as channelName!
+    if (reassignToName && reassignToName !== 'keep') {
+      const target = reassignToName;
+      setSales(prev =>
+        prev.map(s => (s.channel === channelName ? { ...s, channel: target } : s))
+      );
+    }
+    setNewSale(prev => (prev.channel === channelName ? { ...prev, channel: salesChannels.find(c => c.id !== id)?.name || 'Direct / Walk-In' } : prev));
+  };
+
+  const handleResetChannels = () => {
+    setSalesChannels(DEFAULT_SALES_CHANNELS);
+  };
+
+  // Product Archiving and Safe Deletion Handlers
+  const handleArchiveProduct = (id: string, isArchived: boolean) => {
+    setProducts(prev =>
+      prev.map(p =>
+        p.id === id
+          ? {
+              ...p,
+              isArchived,
+              archivedAt: isArchived ? new Date().toISOString() : undefined
+            }
+          : p
+      )
+    );
+  };
+
+  const handleDeleteProduct = (id: string) => {
+    const prod = products.find(p => p.id === id);
+    if (prod) {
+      setDeletedProducts(prev => [
+        ...prev.filter(p => p.id !== id),
+        { ...prod, isArchived: true, archivedAt: new Date().toISOString() }
+      ]);
+
+      // Guarantee all past sales records preserve product name and landed cost snapshots
+      setSales(prevSales =>
+        prevSales.map(s => {
+          let updated = { ...s };
+          let changed = false;
+          if (s.itemId === id) {
+            if (!s.itemNameSnapshot) {
+              updated.itemNameSnapshot = prod.name;
+              changed = true;
+            }
+            if (s.itemLandedCostSnapshot === undefined) {
+              updated.itemLandedCostSnapshot = prod.unitLandedCost;
+              changed = true;
+            }
+          }
+          if (s.items && s.items.some(it => it.productId === id)) {
+            updated.items = s.items.map(it => {
+              if (it.productId === id) {
+                return {
+                  ...it,
+                  productName: it.productName || prod.name,
+                  unitLandedCost: it.unitLandedCost !== undefined ? it.unitLandedCost : prod.unitLandedCost
+                };
+              }
+              return it;
+            });
+            changed = true;
+          }
+          if (s.gift && s.gift.isProduct && s.gift.productId === id) {
+            updated.gift = {
+              ...s.gift,
+              productName: s.gift.productName || prod.name,
+              cost: s.gift.cost !== undefined ? s.gift.cost : prod.unitLandedCost
+            };
+            changed = true;
+          }
+          return changed ? updated : s;
+        })
+      );
+    }
+    setProducts(prev => prev.filter(p => p.id !== id));
+  };
 
   // Handle User Login/Signup
   const handleAuthSuccess = (user: UserProfile) => {
@@ -140,10 +266,11 @@ export default function App({ data, updateItem }: AppProps = {}) {
     setAuthNotice(null);
     const loaded = loadUserData(user.id);
     setProducts(loaded.products);
+    setDeletedProducts(loaded.deletedProducts || []);
     setCombos(loaded.combos);
     setBatches(loaded.batches);
     setSales(loaded.sales);
-    setSalesChannels(loaded.salesChannels || DEFAULT_SALES_CHANNELS);
+    setSalesChannels(loaded.salesChannels);
   };
 
   // Handle Logout
@@ -151,6 +278,7 @@ export default function App({ data, updateItem }: AppProps = {}) {
     logoutUser();
     setCurrentUser(null);
     setShowSettingsModal(false);
+    setShowChannelsModal(false);
     setShowExportModal(false);
     setShowAddSaleModal(false);
     setShowAddBatchModal(false);
@@ -229,7 +357,6 @@ export default function App({ data, updateItem }: AppProps = {}) {
   const handleResetFilters = () => {
     setSelectedCategory('all');
     setSelectedProductFilter('all');
-    setSelectedChannelFilter('all');
     setSelectedTimePreset('all');
     const curYearNow = new Date().getFullYear();
     handleDateRangeChange('2024-01-01', `${curYearNow + 1}-12-31`);
@@ -238,19 +365,16 @@ export default function App({ data, updateItem }: AppProps = {}) {
   // Costing calculations helpers
   const getProductCostBreakdown = (product: ProductItem) => {
     const unitLanded = Number(product.unitLandedCost) || 0;
-    const packaging = Number(product.packagingCost) || 0;
-    const gift = Number(product.giftCost) || 0;
-    const misc = Number(product.miscCost) || 0;
-    const totalCost = unitLanded + packaging + gift + misc;
+    const totalCost = unitLanded;
     const selling = Number(product.sellingPrice) || 0;
     const grossProfit = selling - unitLanded;
     const netProfit = selling - totalCost;
     const marginPercent = selling > 0 ? (netProfit / selling) * 100 : 0;
     return {
       unitLanded,
-      packaging,
-      gift,
-      misc,
+      packaging: 0,
+      gift: 0,
+      misc: 0,
       totalCost,
       sellingPrice: selling,
       grossProfit,
@@ -316,6 +440,7 @@ export default function App({ data, updateItem }: AppProps = {}) {
         product: p,
         totalStockedIn: 0,
         totalSold: 0,
+        totalGifted: 0,
         currentStock: 0,
         lowStockThreshold: 10,
         totalStockCostValue: 0
@@ -331,6 +456,16 @@ export default function App({ data, updateItem }: AppProps = {}) {
     });
 
     sales.forEach(s => {
+      // Exclude cancelled sales from consuming inventory
+      if (s.deliveryStatus === 'Cancelled') return;
+
+      // Deduct inventory if sale includes a product gift
+      if (s.gift && s.gift.hasGift && s.gift.isProduct && s.gift.productId) {
+        if (stockMap[s.gift.productId]) {
+          stockMap[s.gift.productId].totalGifted += (Number(s.gift.qty) || 1);
+        }
+      }
+
       if (s.items && s.items.length > 0) {
         s.items.forEach(it => {
           if (stockMap[it.productId]) {
@@ -356,7 +491,7 @@ export default function App({ data, updateItem }: AppProps = {}) {
     });
 
     Object.values(stockMap).forEach(st => {
-      st.currentStock = st.totalStockedIn - st.totalSold;
+      st.currentStock = st.totalStockedIn - (st.totalSold + st.totalGifted);
       st.totalStockCostValue = st.currentStock * (st.product.unitLandedCost || 0);
     });
 
@@ -421,10 +556,6 @@ export default function App({ data, updateItem }: AppProps = {}) {
       if (startDate && s.date < startDate) return false;
       if (endDate && s.date > endDate) return false;
 
-      if (selectedChannelFilter !== 'all' && (s.channel || 'Direct') !== selectedChannelFilter) {
-        return false;
-      }
-
       if (selectedProductFilter !== 'all') {
         if (s.items && s.items.length > 0) {
           const hasProd = s.items.some(it => it.productId === selectedProductFilter);
@@ -460,7 +591,7 @@ export default function App({ data, updateItem }: AppProps = {}) {
 
       return true;
     });
-  }, [sales, startDate, endDate, selectedCategory, selectedProductFilter, selectedChannelFilter, products, combos]);
+  }, [sales, startDate, endDate, selectedCategory, selectedProductFilter, products, combos]);
 
   // Compute 360 Dashboard KPI Metrics
   const dashboardMetrics = useMemo(() => {
@@ -560,7 +691,6 @@ export default function App({ data, updateItem }: AppProps = {}) {
   const [showAddComboModal, setShowAddComboModal] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [showManageChannelsModal, setShowManageChannelsModal] = useState(false);
 
   // Girly Accent Color Preset & Dark Mode Theme State
   const [currentPreset, setCurrentPreset] = useState<AccentPresetId>(getSavedThemePreset());
@@ -587,22 +717,18 @@ export default function App({ data, updateItem }: AppProps = {}) {
     code: '',
     category: 'Lip Gloss',
     unitLandedCost: 1000,
-    packagingCost: 200,
-    giftCost: 50,
-    miscCost: 30,
     sellingPrice: 3000
   });
 
   const handleOpenAddProduct = () => {
     setEditingProductId(null);
+    const initialCategory = 'Lip Gloss';
+    const autoCode = generateUniqueSKU('', initialCategory, products);
     setNewProd({
       name: '',
-      code: '',
-      category: 'Lip Gloss',
+      code: autoCode,
+      category: initialCategory,
       unitLandedCost: 1000,
-      packagingCost: 200,
-      giftCost: 50,
-      miscCost: 30,
       sellingPrice: 3000
     });
     setShowAddProductModal(true);
@@ -615,9 +741,6 @@ export default function App({ data, updateItem }: AppProps = {}) {
       code: prod.code,
       category: prod.category || 'Lip Gloss',
       unitLandedCost: Number(prod.unitLandedCost) || 0,
-      packagingCost: Number(prod.packagingCost) || 0,
-      giftCost: Number(prod.giftCost) || 0,
-      miscCost: Number(prod.miscCost) || 0,
       sellingPrice: Number(prod.sellingPrice) || 0
     });
     setShowAddProductModal(true);
@@ -626,14 +749,12 @@ export default function App({ data, updateItem }: AppProps = {}) {
   const handleCloseProductModal = () => {
     setShowAddProductModal(false);
     setEditingProductId(null);
+    const autoCode = generateUniqueSKU('', 'Lip Gloss', products);
     setNewProd({
       name: '',
-      code: '',
+      code: autoCode,
       category: 'Lip Gloss',
       unitLandedCost: 1000,
-      packagingCost: 200,
-      giftCost: 50,
-      miscCost: 30,
       sellingPrice: 3000
     });
   };
@@ -696,6 +817,8 @@ export default function App({ data, updateItem }: AppProps = {}) {
     sellingPrice: products[0]?.sellingPrice || 3500,
     customer: '',
     channel: 'Instagram DM',
+    paymentStatus: 'Paid' as PaymentStatus,
+    deliveryStatus: 'Delivered' as DeliveryStatus,
     items: [
       {
         productId: products[0]?.id || '',
@@ -703,16 +826,25 @@ export default function App({ data, updateItem }: AppProps = {}) {
         unitPrice: products[0]?.sellingPrice || 3500
       }
     ],
-    packagingCost: products[0]?.packagingCost !== undefined ? Number(products[0].packagingCost) : 200,
+    packagingCost: 0,
     comboId: combos[0]?.id || '',
     comboQty: 1,
-    comboSellingPrice: combos[0] ? 5400 : 5400
+    comboSellingPrice: combos[0] ? 5400 : 5400,
+    hasGift: false,
+    gift: {
+      hasGift: false,
+      isProduct: true,
+      productId: products[0]?.id || '',
+      productName: products[0]?.name || '',
+      qty: 1,
+      cost: products[0]?.unitLandedCost || 0,
+      description: ''
+    }
   });
 
   const handleOpenRecordSale = () => {
     setEditingSaleId(null);
-    const firstProd = products[0];
-    const defaultPkg = firstProd?.packagingCost !== undefined ? Number(firstProd.packagingCost) : 200;
+    const firstProd = products.find(p => !p.isArchived) || products[0];
     setNewSale({
       date: new Date().toISOString().slice(0, 10),
       type: 'single',
@@ -720,7 +852,9 @@ export default function App({ data, updateItem }: AppProps = {}) {
       qty: 1,
       sellingPrice: firstProd?.sellingPrice || 3500,
       customer: '',
-      channel: 'Instagram DM',
+      channel: salesChannels[0]?.name || 'Instagram DM',
+      paymentStatus: 'Paid',
+      deliveryStatus: 'Delivered',
       items: [
         {
           productId: firstProd?.id || '',
@@ -728,16 +862,46 @@ export default function App({ data, updateItem }: AppProps = {}) {
           unitPrice: firstProd?.sellingPrice || 3500
         }
       ],
-      packagingCost: defaultPkg,
+      packagingCost: 0,
       comboId: combos[0]?.id || '',
       comboQty: 1,
-      comboSellingPrice: combos[0] ? getComboCostBreakdown(combos[0]).finalSellingPrice : 5400
+      comboSellingPrice: combos[0] ? getComboCostBreakdown(combos[0]).finalSellingPrice : 5400,
+      hasGift: false,
+      gift: {
+        hasGift: false,
+        isProduct: true,
+        productId: firstProd?.id || '',
+        productName: firstProd?.name || '',
+        qty: 1,
+        cost: firstProd?.unitLandedCost || 0,
+        description: ''
+      }
     });
     setShowAddSaleModal(true);
   };
 
   const handleOpenEditSale = (sale: SaleRecord) => {
     setEditingSaleId(sale.id);
+    const saleGiftState = sale.gift && sale.gift.hasGift ? {
+      hasGift: true,
+      isProduct: Boolean(sale.gift.isProduct),
+      productId: sale.gift.productId || products[0]?.id || '',
+      productName: sale.gift.productName || (products.find(p => p.id === sale.gift?.productId)?.name || ''),
+      qty: Number(sale.gift.qty) || 1,
+      cost: Number(sale.gift.cost) >= 0 ? Number(sale.gift.cost) : 0,
+      description: sale.gift.description || ''
+    } : {
+      hasGift: false,
+      isProduct: true,
+      productId: products[0]?.id || '',
+      productName: products[0]?.name || '',
+      qty: 1,
+      cost: products[0]?.unitLandedCost || 0,
+      description: ''
+    };
+
+    const pkg = sale.packagingCost !== undefined ? Number(sale.packagingCost) : 0;
+
     if (sale.type === 'combo') {
       const cmb = combos.find(c => c.id === sale.itemId);
       const price = Number(sale.sellingPrice) >= 0 ? Number(sale.sellingPrice) : (cmb ? getComboCostBreakdown(cmb).finalSellingPrice : 5400);
@@ -749,6 +913,8 @@ export default function App({ data, updateItem }: AppProps = {}) {
         sellingPrice: price,
         customer: sale.customer || '',
         channel: sale.channel || 'Instagram DM',
+        paymentStatus: sale.paymentStatus || 'Paid',
+        deliveryStatus: sale.deliveryStatus || 'Delivered',
         items: [
           {
             productId: products[0]?.id || '',
@@ -756,21 +922,21 @@ export default function App({ data, updateItem }: AppProps = {}) {
             unitPrice: products[0]?.sellingPrice || 3500
           }
         ],
-        packagingCost: 0,
+        packagingCost: pkg,
         comboId: sale.itemId,
         comboQty: Number(sale.qty) || 1,
-        comboSellingPrice: price
+        comboSellingPrice: price,
+        hasGift: Boolean(sale.gift && sale.gift.hasGift),
+        gift: saleGiftState
       });
     } else {
       let itemsList: SaleItemEntry[] = [];
-      let pkg = 0;
       if (sale.items && sale.items.length > 0) {
         itemsList = sale.items.map(it => ({
           productId: it.productId,
           qty: Number(it.qty) || 1,
           unitPrice: Number(it.unitPrice) >= 0 ? Number(it.unitPrice) : 0
         }));
-        pkg = sale.packagingCost !== undefined ? Number(sale.packagingCost) : 0;
       } else {
         const p = products.find(prod => prod.id === sale.itemId);
         itemsList = [
@@ -780,7 +946,6 @@ export default function App({ data, updateItem }: AppProps = {}) {
             unitPrice: Number(sale.sellingPrice) >= 0 ? Number(sale.sellingPrice) : (p?.sellingPrice || 3500)
           }
         ];
-        pkg = sale.packagingCost !== undefined ? Number(sale.packagingCost) : (p?.packagingCost || 200);
       }
 
       setNewSale({
@@ -791,11 +956,15 @@ export default function App({ data, updateItem }: AppProps = {}) {
         sellingPrice: itemsList[0]?.unitPrice || 0,
         customer: sale.customer || '',
         channel: sale.channel || 'Instagram DM',
+        paymentStatus: sale.paymentStatus || 'Paid',
+        deliveryStatus: sale.deliveryStatus || 'Delivered',
         items: itemsList,
         packagingCost: pkg,
         comboId: combos[0]?.id || '',
         comboQty: 1,
-        comboSellingPrice: combos[0] ? getComboCostBreakdown(combos[0]).finalSellingPrice : 5400
+        comboSellingPrice: combos[0] ? getComboCostBreakdown(combos[0]).finalSellingPrice : 5400,
+        hasGift: Boolean(sale.gift && sale.gift.hasGift),
+        gift: saleGiftState
       });
     }
     setShowAddSaleModal(true);
@@ -806,6 +975,27 @@ export default function App({ data, updateItem }: AppProps = {}) {
     const sorted = [...sales].sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
     const lastSale = sorted[0];
     setEditingSaleId(null);
+
+    const saleGiftState = lastSale.gift && lastSale.gift.hasGift ? {
+      hasGift: true,
+      isProduct: Boolean(lastSale.gift.isProduct),
+      productId: lastSale.gift.productId || products[0]?.id || '',
+      productName: lastSale.gift.productName || (products.find(p => p.id === lastSale.gift?.productId)?.name || ''),
+      qty: Number(lastSale.gift.qty) || 1,
+      cost: Number(lastSale.gift.cost) >= 0 ? Number(lastSale.gift.cost) : 0,
+      description: lastSale.gift.description || ''
+    } : {
+      hasGift: false,
+      isProduct: true,
+      productId: products[0]?.id || '',
+      productName: products[0]?.name || '',
+      qty: 1,
+      cost: products[0]?.unitLandedCost || 0,
+      description: ''
+    };
+
+    const pkg = lastSale.packagingCost !== undefined ? Number(lastSale.packagingCost) : 0;
+
     if (lastSale.type === 'combo') {
       const cmb = combos.find(c => c.id === lastSale.itemId);
       const price = Number(lastSale.sellingPrice) >= 0 ? Number(lastSale.sellingPrice) : (cmb ? getComboCostBreakdown(cmb).finalSellingPrice : 5400);
@@ -817,6 +1007,8 @@ export default function App({ data, updateItem }: AppProps = {}) {
         sellingPrice: price,
         customer: lastSale.customer || '',
         channel: lastSale.channel || 'Instagram DM',
+        paymentStatus: lastSale.paymentStatus || 'Paid',
+        deliveryStatus: lastSale.deliveryStatus || 'Delivered',
         items: [
           {
             productId: products[0]?.id || '',
@@ -824,21 +1016,21 @@ export default function App({ data, updateItem }: AppProps = {}) {
             unitPrice: products[0]?.sellingPrice || 3500
           }
         ],
-        packagingCost: 0,
+        packagingCost: pkg,
         comboId: lastSale.itemId,
         comboQty: Number(lastSale.qty) || 1,
-        comboSellingPrice: price
+        comboSellingPrice: price,
+        hasGift: Boolean(lastSale.gift && lastSale.gift.hasGift),
+        gift: saleGiftState
       });
     } else {
       let itemsList: SaleItemEntry[] = [];
-      let pkg = 0;
       if (lastSale.items && lastSale.items.length > 0) {
         itemsList = lastSale.items.map(it => ({
           productId: it.productId,
           qty: Number(it.qty) || 1,
           unitPrice: Number(it.unitPrice) >= 0 ? Number(it.unitPrice) : 0
         }));
-        pkg = lastSale.packagingCost !== undefined ? Number(lastSale.packagingCost) : 0;
       } else {
         const p = products.find(prod => prod.id === lastSale.itemId);
         itemsList = [
@@ -848,7 +1040,6 @@ export default function App({ data, updateItem }: AppProps = {}) {
             unitPrice: Number(lastSale.sellingPrice) >= 0 ? Number(lastSale.sellingPrice) : (p?.sellingPrice || 3500)
           }
         ];
-        pkg = lastSale.packagingCost !== undefined ? Number(lastSale.packagingCost) : (p?.packagingCost || 200);
       }
 
       setNewSale({
@@ -859,11 +1050,15 @@ export default function App({ data, updateItem }: AppProps = {}) {
         sellingPrice: itemsList[0]?.unitPrice || 0,
         customer: lastSale.customer || '',
         channel: lastSale.channel || 'Instagram DM',
+        paymentStatus: lastSale.paymentStatus || 'Paid',
+        deliveryStatus: lastSale.deliveryStatus || 'Delivered',
         items: itemsList,
         packagingCost: pkg,
         comboId: combos[0]?.id || '',
         comboQty: 1,
-        comboSellingPrice: combos[0] ? getComboCostBreakdown(combos[0]).finalSellingPrice : 5400
+        comboSellingPrice: combos[0] ? getComboCostBreakdown(combos[0]).finalSellingPrice : 5400,
+        hasGift: Boolean(lastSale.gift && lastSale.gift.hasGift),
+        gift: saleGiftState
       });
     }
     setShowAddSaleModal(true);
@@ -872,8 +1067,7 @@ export default function App({ data, updateItem }: AppProps = {}) {
   const handleCloseSaleModal = () => {
     setShowAddSaleModal(false);
     setEditingSaleId(null);
-    const firstProd = products[0];
-    const defaultPkg = firstProd?.packagingCost !== undefined ? Number(firstProd.packagingCost) : 200;
+    const firstProd = products.find(p => !p.isArchived) || products[0];
     setNewSale({
       date: new Date().toISOString().slice(0, 10),
       type: 'single',
@@ -881,7 +1075,9 @@ export default function App({ data, updateItem }: AppProps = {}) {
       qty: 1,
       sellingPrice: firstProd?.sellingPrice || 3500,
       customer: '',
-      channel: 'Instagram DM',
+      channel: salesChannels[0]?.name || 'Instagram DM',
+      paymentStatus: 'Paid',
+      deliveryStatus: 'Delivered',
       items: [
         {
           productId: firstProd?.id || '',
@@ -889,10 +1085,20 @@ export default function App({ data, updateItem }: AppProps = {}) {
           unitPrice: firstProd?.sellingPrice || 3500
         }
       ],
-      packagingCost: defaultPkg,
+      packagingCost: 0,
       comboId: combos[0]?.id || '',
       comboQty: 1,
-      comboSellingPrice: combos[0] ? getComboCostBreakdown(combos[0]).finalSellingPrice : 5400
+      comboSellingPrice: combos[0] ? getComboCostBreakdown(combos[0]).finalSellingPrice : 5400,
+      hasGift: false,
+      gift: {
+        hasGift: false,
+        isProduct: true,
+        productId: firstProd?.id || '',
+        productName: firstProd?.name || '',
+        qty: 1,
+        cost: firstProd?.unitLandedCost || 0,
+        description: ''
+      }
     });
   };
 
@@ -907,47 +1113,14 @@ export default function App({ data, updateItem }: AppProps = {}) {
     customSellingPrice: 0
   });
 
-  // Sales Channels Management Handlers
-  const handleAddSalesChannel = (channelName: string): boolean => {
-    const trimmed = channelName.trim();
-    if (!trimmed) return false;
-    if (salesChannels.some(c => c.toLowerCase() === trimmed.toLowerCase())) return false;
-    setSalesChannels(prev => [...prev, trimmed]);
-    return true;
-  };
-
-  const handleUpdateSalesChannel = (oldName: string, newName: string): boolean => {
-    const trimmed = newName.trim();
-    if (!trimmed) return false;
-    if (salesChannels.some(c => c.toLowerCase() === trimmed.toLowerCase() && c !== oldName)) return false;
-    setSalesChannels(prev => prev.map(c => c === oldName ? trimmed : c));
-    if (newSale.channel === oldName) {
-      setNewSale(prev => ({ ...prev, channel: trimmed }));
-    }
-    setSales(prev => prev.map(s => s.channel === oldName ? { ...s, channel: trimmed } : s));
-    return true;
-  };
-
-  const handleDeleteSalesChannel = (channelName: string) => {
-    if (salesChannels.length <= 1) return;
-    const remaining = salesChannels.filter(c => c !== channelName);
-    setSalesChannels(remaining);
-    if (newSale.channel === channelName) {
-      setNewSale(prev => ({ ...prev, channel: remaining[0] || 'Direct' }));
-    }
-  };
-
-  const handleResetSalesChannels = () => {
-    setSalesChannels(DEFAULT_SALES_CHANNELS);
-    if (!DEFAULT_SALES_CHANNELS.includes(newSale.channel)) {
-      setNewSale(prev => ({ ...prev, channel: DEFAULT_SALES_CHANNELS[0] }));
-    }
-  };
-
   // Handlers
   const handleSaveProduct = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newProd.name.trim()) return;
+
+    const finalCode = newProd.code.trim()
+      ? newProd.code.trim().toUpperCase()
+      : generateUniqueSKU(newProd.name.trim(), newProd.category, products, editingProductId);
 
     if (editingProductId) {
       setProducts(prevProducts =>
@@ -956,12 +1129,9 @@ export default function App({ data, updateItem }: AppProps = {}) {
             ? {
                 ...p,
                 name: newProd.name.trim(),
-                code: newProd.code.trim() ? newProd.code.trim().toUpperCase() : p.code,
+                code: finalCode,
                 category: newProd.category,
                 unitLandedCost: Math.max(0, Number(newProd.unitLandedCost) || 0),
-                packagingCost: Math.max(0, Number(newProd.packagingCost) || 0),
-                giftCost: Math.max(0, Number(newProd.giftCost) || 0),
-                miscCost: Math.max(0, Number(newProd.miscCost) || 0),
                 sellingPrice: Math.max(0, Number(newProd.sellingPrice) || 0)
               }
             : p
@@ -971,12 +1141,9 @@ export default function App({ data, updateItem }: AppProps = {}) {
       const created: ProductItem = {
         id: `PRD-${String(products.length + 1).padStart(3, '0')}`,
         name: newProd.name.trim(),
-        code: newProd.code.trim() ? newProd.code.trim().toUpperCase() : `PRD-${String(products.length + 1).padStart(3, '0')}`,
+        code: finalCode,
         category: newProd.category,
         unitLandedCost: Math.max(0, Number(newProd.unitLandedCost) || 0),
-        packagingCost: Math.max(0, Number(newProd.packagingCost) || 0),
-        giftCost: Math.max(0, Number(newProd.giftCost) || 0),
-        miscCost: Math.max(0, Number(newProd.miscCost) || 0),
         sellingPrice: Math.max(0, Number(newProd.sellingPrice) || 0)
       };
       setProducts(prev => [...prev, created]);
@@ -1062,6 +1229,21 @@ export default function App({ data, updateItem }: AppProps = {}) {
       }, 0) + 1;
     };
 
+    const pkgCost = Math.max(0, Number(newSale.packagingCost) || 0);
+
+    // Prepare Gift Payload if gift is enabled
+    const giftPayload: SaleGift | undefined = newSale.hasGift && newSale.gift ? {
+      hasGift: true,
+      isProduct: Boolean(newSale.gift.isProduct),
+      productId: newSale.gift.isProduct ? (newSale.gift.productId || products[0]?.id || '') : undefined,
+      productName: newSale.gift.isProduct
+        ? (products.find(p => p.id === newSale.gift?.productId)?.name || newSale.gift.productName || '')
+        : undefined,
+      qty: Math.max(1, Number(newSale.gift.qty) || 1),
+      cost: Math.max(0, Number(newSale.gift.cost) || 0),
+      description: newSale.gift.isProduct ? undefined : (newSale.gift.description || '')
+    } : undefined;
+
     if (newSale.type === 'combo') {
       const comboId = newSale.comboId || newSale.itemId || combos[0]?.id || '';
       if (!comboId) return;
@@ -1069,6 +1251,9 @@ export default function App({ data, updateItem }: AppProps = {}) {
       const price = Number(newSale.comboSellingPrice !== undefined ? newSale.comboSellingPrice : newSale.sellingPrice) >= 0
         ? Number(newSale.comboSellingPrice !== undefined ? newSale.comboSellingPrice : newSale.sellingPrice)
         : 0;
+
+      const payStatus: PaymentStatus = newSale.paymentStatus || 'Paid';
+      const delStatus: DeliveryStatus = newSale.deliveryStatus || 'Delivered';
 
       if (editingSaleId) {
         savedSale = {
@@ -1078,6 +1263,10 @@ export default function App({ data, updateItem }: AppProps = {}) {
           itemId: comboId,
           qty: qty,
           sellingPrice: price,
+          packagingCost: pkgCost,
+          gift: giftPayload,
+          paymentStatus: payStatus,
+          deliveryStatus: delStatus,
           customer: newSale.customer.trim() || 'Direct Customer',
           channel: newSale.channel || 'Instagram DM'
         };
@@ -1091,6 +1280,10 @@ export default function App({ data, updateItem }: AppProps = {}) {
           itemId: comboId,
           qty: qty,
           sellingPrice: price,
+          packagingCost: pkgCost,
+          gift: giftPayload,
+          paymentStatus: payStatus,
+          deliveryStatus: delStatus,
           customer: newSale.customer.trim() || 'Direct Customer',
           channel: newSale.channel || 'Instagram DM'
         };
@@ -1111,13 +1304,21 @@ export default function App({ data, updateItem }: AppProps = {}) {
       const totalQty = validItems.reduce((acc: number, it: any) => acc + (Number(it.qty) || 0), 0);
       const totalRev = validItems.reduce((acc: number, it: any) => acc + (Number(it.qty) || 0) * (Number(it.unitPrice) || 0), 0);
       const avgPrice = totalQty > 0 ? totalRev / totalQty : 0;
-      const pkgCost = Math.max(0, Number(newSale.packagingCost) || 0);
 
-      const itemsPayload: SaleItemEntry[] = validItems.map((it: any) => ({
-        productId: it.productId,
-        qty: Number(it.qty) || 1,
-        unitPrice: Number(it.unitPrice) >= 0 ? Number(it.unitPrice) : 0
-      }));
+      const itemsPayload: SaleItemEntry[] = validItems.map((it: any) => {
+        const prod = allKnownProducts.find(p => p.id === it.productId);
+        return {
+          productId: it.productId,
+          qty: Number(it.qty) || 1,
+          unitPrice: Number(it.unitPrice) >= 0 ? Number(it.unitPrice) : 0,
+          productName: prod?.name || it.productName || 'Catalog Product',
+          unitLandedCost: prod?.unitLandedCost !== undefined ? Number(prod.unitLandedCost) : Number(it.unitLandedCost || 0)
+        };
+      });
+
+      const primaryProd = allKnownProducts.find(p => p.id === validItems[0].productId);
+      const payStatus: PaymentStatus = newSale.paymentStatus || 'Paid';
+      const delStatus: DeliveryStatus = newSale.deliveryStatus || 'Delivered';
 
       if (editingSaleId) {
         savedSale = {
@@ -1129,8 +1330,13 @@ export default function App({ data, updateItem }: AppProps = {}) {
           sellingPrice: avgPrice,
           items: itemsPayload,
           packagingCost: pkgCost,
+          gift: giftPayload,
+          paymentStatus: payStatus,
+          deliveryStatus: delStatus,
           customer: newSale.customer.trim() || 'Direct Customer',
-          channel: newSale.channel || 'Instagram DM'
+          channel: newSale.channel || 'Instagram DM',
+          itemNameSnapshot: primaryProd?.name,
+          itemLandedCostSnapshot: primaryProd?.unitLandedCost
         };
         setSales(prev => prev.map(s => s.id === editingSaleId ? savedSale : s));
       } else {
@@ -1144,8 +1350,13 @@ export default function App({ data, updateItem }: AppProps = {}) {
           sellingPrice: avgPrice,
           items: itemsPayload,
           packagingCost: pkgCost,
+          gift: giftPayload,
+          paymentStatus: payStatus,
+          deliveryStatus: delStatus,
           customer: newSale.customer.trim() || 'Direct Customer',
-          channel: newSale.channel || 'Instagram DM'
+          channel: newSale.channel || 'Instagram DM',
+          itemNameSnapshot: primaryProd?.name,
+          itemLandedCostSnapshot: primaryProd?.unitLandedCost
         };
         setSales(prev => [savedSale, ...prev]);
       }
@@ -1162,6 +1373,17 @@ export default function App({ data, updateItem }: AppProps = {}) {
     }
 
     handleCloseSaleModal();
+  };
+
+  const handleUpdateSaleStatus = (saleId: string, paymentStatus?: PaymentStatus, deliveryStatus?: DeliveryStatus) => {
+    setSales(prev => prev.map(s => {
+      if (s.id !== saleId) return s;
+      return {
+        ...s,
+        paymentStatus: paymentStatus !== undefined ? paymentStatus : (s.paymentStatus || 'Paid'),
+        deliveryStatus: deliveryStatus !== undefined ? deliveryStatus : (s.deliveryStatus || 'Delivered')
+      };
+    }));
   };
 
   const handleSaveCombo = (e: React.FormEvent) => {
@@ -1253,8 +1475,6 @@ export default function App({ data, updateItem }: AppProps = {}) {
         onSelectPreset={handleSelectPreset}
         onOpenSettings={() => setShowSettingsModal(true)}
         onOpenDeleteAccount={() => setShowDeleteAccountModal(true)}
-        salesChannelsCount={salesChannels.length}
-        onOpenManageChannels={() => setShowManageChannelsModal(true)}
       />
 
       {/* Global Filter Bar - only display on operational tabs */}
@@ -1265,17 +1485,13 @@ export default function App({ data, updateItem }: AppProps = {}) {
           selectedTimePreset={selectedTimePreset}
           selectedCategory={selectedCategory}
           selectedProductFilter={selectedProductFilter}
-          selectedChannelFilter={selectedChannelFilter}
           categories={categories}
           products={products}
-          salesChannels={salesChannels}
           onPresetSelect={handlePresetSelect}
           onDateRangeChange={handleDateRangeChange}
           setSelectedCategory={setSelectedCategory}
           setSelectedProductFilter={setSelectedProductFilter}
-          setSelectedChannelFilter={setSelectedChannelFilter}
           setSelectedTimePreset={setSelectedTimePreset}
-          onOpenManageChannels={() => setShowManageChannelsModal(true)}
         />
       )}
 
@@ -1286,7 +1502,7 @@ export default function App({ data, updateItem }: AppProps = {}) {
             metrics={dashboardMetrics}
             timelineData={salesTimelineData}
             inventoryList={inventoryList}
-            products={products}
+            products={allKnownProducts}
             combos={combos}
             sales={sales}
             onOpenRecordSale={handleOpenRecordSale}
@@ -1305,9 +1521,8 @@ export default function App({ data, updateItem }: AppProps = {}) {
             selectedCategory={selectedCategory}
             selectedProductFilter={selectedProductFilter}
             onResetFilters={handleResetFilters}
-            onDeleteProduct={(id) => {
-              setProducts(prev => prev.filter(p => p.id !== id));
-            }}
+            onDeleteProduct={(id) => handleDeleteProduct(id)}
+            onArchiveProduct={handleArchiveProduct}
             onOpenAddProduct={handleOpenAddProduct}
             onEditProduct={handleOpenEditProduct}
             getProductCostBreakdown={getProductCostBreakdown}
@@ -1317,9 +1532,10 @@ export default function App({ data, updateItem }: AppProps = {}) {
         {activeTab === 'stockin' && (
           <StockInView
             batches={batches}
-            products={products}
+            products={allKnownProducts}
             sales={sales}
             combos={combos}
+            inventoryList={inventoryList}
             onOpenAddBatch={handleOpenAddBatch}
             onEditBatch={handleOpenEditBatch}
             onDeleteBatch={(id) => {
@@ -1350,22 +1566,21 @@ export default function App({ data, updateItem }: AppProps = {}) {
           <SalesView
             sales={sales}
             filteredSales={filteredSales}
-            products={products}
+            products={allKnownProducts}
             combos={combos}
+            salesChannels={salesChannels}
             onOpenRecordSale={handleOpenRecordSale}
             onRepeatLastSale={handleRepeatLastSale}
             onEditSale={handleOpenEditSale}
+            onUpdateSaleStatus={handleUpdateSaleStatus}
             onOpenExportReport={() => setShowExportModal(true)}
+            onOpenManageChannels={() => setShowChannelsModal(true)}
             onDeleteSale={(id) => {
               setSales(prev => prev.filter(s => s.id !== id));
             }}
             onResetFilters={handleResetFilters}
             getProductCostBreakdown={getProductCostBreakdown}
             getComboCostBreakdown={getComboCostBreakdown}
-            salesChannels={salesChannels}
-            channelFilter={selectedChannelFilter}
-            onChannelFilterChange={setSelectedChannelFilter}
-            onOpenManageChannels={() => setShowManageChannelsModal(true)}
           />
         )}
 
@@ -1391,6 +1606,7 @@ export default function App({ data, updateItem }: AppProps = {}) {
             batchesCount={batches.length}
             combosCount={combos.length}
             salesCount={sales.length}
+            inventoryList={inventoryList}
           />
         )}
       </main>
@@ -1402,7 +1618,7 @@ export default function App({ data, updateItem }: AppProps = {}) {
         metrics={dashboardMetrics}
         filteredSales={filteredSales}
         allSales={sales}
-        products={products}
+        products={allKnownProducts}
         combos={combos}
         batches={batches}
         inventoryList={inventoryList}
@@ -1446,22 +1662,10 @@ export default function App({ data, updateItem }: AppProps = {}) {
         isDarkMode={isDarkMode}
         onToggleDarkMode={handleToggleDarkMode}
         currentUser={currentUser}
+        salesChannelsCount={salesChannels.length}
+        onOpenManageChannels={() => setShowChannelsModal(true)}
         onOpenDeleteAccount={() => setShowDeleteAccountModal(true)}
         onLogout={handleLogout}
-        salesChannels={salesChannels}
-        onOpenManageChannels={() => setShowManageChannelsModal(true)}
-      />
-
-      {/* Manage Sales Channels Modal */}
-      <ManageChannelsModal
-        isOpen={showManageChannelsModal}
-        onClose={() => setShowManageChannelsModal(false)}
-        channels={salesChannels}
-        onAddChannel={handleAddSalesChannel}
-        onUpdateChannel={handleUpdateSalesChannel}
-        onDeleteChannel={handleDeleteSalesChannel}
-        onResetDefaults={handleResetSalesChannels}
-        sales={sales}
       />
 
       {/* Confirm Delete Account Modal */}
@@ -1483,6 +1687,21 @@ export default function App({ data, updateItem }: AppProps = {}) {
         />
       )}
 
+      {/* Manage Sales Channels Modal */}
+      <ManageSalesChannelsModal
+        isOpen={showChannelsModal}
+        onClose={() => setShowChannelsModal(false)}
+        salesChannels={salesChannels}
+        sales={sales}
+        onAddChannel={handleAddChannel}
+        onUpdateChannel={handleUpdateChannel}
+        onDeleteChannel={handleDeleteChannel}
+        onResetChannels={handleResetChannels}
+        onSelectChannelAfterAdd={(name) => {
+          setNewSale(prev => ({ ...prev, channel: name }));
+        }}
+      />
+
       {/* Sleek Modals */}
       <Modals
         showAddSaleModal={showAddSaleModal}
@@ -1492,6 +1711,8 @@ export default function App({ data, updateItem }: AppProps = {}) {
         editingSaleId={editingSaleId}
         onCloseSaleModal={handleCloseSaleModal}
         handleSaveSale={handleSaveSale}
+        salesChannels={salesChannels}
+        onOpenManageChannels={() => setShowChannelsModal(true)}
 
         showAddBatchModal={showAddBatchModal}
         setShowAddBatchModal={setShowAddBatchModal}
@@ -1515,17 +1736,11 @@ export default function App({ data, updateItem }: AppProps = {}) {
         setNewCombo={setNewCombo}
         handleSaveCombo={handleSaveCombo}
 
-        products={products}
+        products={allKnownProducts}
         combos={combos}
+        inventoryStock={inventoryStock}
         getComboCostBreakdown={getComboCostBreakdown}
         getProductCostBreakdown={getProductCostBreakdown}
-
-        salesChannels={salesChannels}
-        onAddSalesChannel={handleAddSalesChannel}
-        onUpdateSalesChannel={handleUpdateSalesChannel}
-        onDeleteSalesChannel={handleDeleteSalesChannel}
-        onResetSalesChannels={handleResetSalesChannels}
-        sales={sales}
       />
     </div>
   );

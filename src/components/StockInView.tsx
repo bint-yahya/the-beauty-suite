@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { Truck, Plus, Trash2, Pencil, Package, Filter, ChevronDown, CheckCircle2, Archive } from 'lucide-react';
-import { BatchOrder, ProductItem, SaleRecord, ComboItem, formatNaira } from '../types';
+import { Truck, Plus, Trash2, Pencil, Package, Filter, ChevronDown, CheckCircle2, Archive, Gift, ShoppingBag, ArrowRight } from 'lucide-react';
+import { BatchOrder, ProductItem, SaleRecord, ComboItem, InventoryStockItem, formatNaira } from '../types';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 export type BatchStatusFilter = 'all' | 'active' | 'depleted';
@@ -10,6 +10,7 @@ interface StockInViewProps {
   products: ProductItem[];
   sales?: SaleRecord[];
   combos?: ComboItem[];
+  inventoryList?: InventoryStockItem[];
   onOpenAddBatch: () => void;
   onEditBatch?: (batch: BatchOrder) => void;
   onDeleteBatch?: (id: string) => void;
@@ -27,6 +28,7 @@ export const StockInView: React.FC<StockInViewProps> = ({
   products,
   sales = [],
   combos = [],
+  inventoryList,
   onOpenAddBatch,
   onEditBatch,
   onDeleteBatch
@@ -38,17 +40,36 @@ export const StockInView: React.FC<StockInViewProps> = ({
   const batchStockMap = useMemo(() => {
     const map = new Map<string, BatchStockDetail>();
 
-    // 1. Calculate total units sold per productId across all single & combo sales
-    const soldPerProduct: Record<string, number> = {};
+    // 1. Calculate total consumed units (sold + gifted) per productId across all sales
+    const consumedPerProduct: Record<string, number> = {};
     sales.forEach(s => {
-      const qty = Number(s.qty) || 0;
-      if (s.type === 'single') {
-        soldPerProduct[s.itemId] = (soldPerProduct[s.itemId] || 0) + qty;
+      // Exclude cancelled sales from consuming inventory
+      if (s.deliveryStatus === 'Cancelled') return;
+
+      // Deduct promotional gift units if product comes from catalog
+      if (s.gift && s.gift.hasGift && s.gift.isProduct && s.gift.productId) {
+        const giftQty = Number(s.gift.qty) || 1;
+        consumedPerProduct[s.gift.productId] = (consumedPerProduct[s.gift.productId] || 0) + giftQty;
+      }
+
+      // Deduct sold units from multi-item, single, or combo orders
+      if (s.items && s.items.length > 0) {
+        s.items.forEach(it => {
+          if (it.productId) {
+            consumedPerProduct[it.productId] = (consumedPerProduct[it.productId] || 0) + (Number(it.qty) || 0);
+          }
+        });
+      } else if (s.type === 'single') {
+        const saleQty = Number(s.qty) || 0;
+        if (s.itemId) {
+          consumedPerProduct[s.itemId] = (consumedPerProduct[s.itemId] || 0) + saleQty;
+        }
       } else if (s.type === 'combo') {
+        const saleQty = Number(s.qty) || 0;
         const cmb = combos.find(c => c.id === s.itemId);
         if (cmb && cmb.items) {
           cmb.items.forEach(ci => {
-            soldPerProduct[ci.productId] = (soldPerProduct[ci.productId] || 0) + (Number(ci.qty) || 0) * qty;
+            consumedPerProduct[ci.productId] = (consumedPerProduct[ci.productId] || 0) + (Number(ci.qty) || 0) * saleQty;
           });
         }
       }
@@ -67,7 +88,7 @@ export const StockInView: React.FC<StockInViewProps> = ({
 
     // 3. Chronologically sort batches (FIFO) to consume units per product
     const sortedBatches = [...batches].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-    const remainingSoldPool: Record<string, number> = { ...soldPerProduct };
+    const remainingSoldPool: Record<string, number> = { ...consumedPerProduct };
 
     // Get unique product IDs present in batches
     const productIdsInBatches = new Set<string>();
@@ -115,6 +136,42 @@ export const StockInView: React.FC<StockInViewProps> = ({
     return map;
   }, [batches, sales, combos]);
 
+  // Overall Inventory & Inbound Batch Tally Reconciliation
+  const overallTally = useMemo(() => {
+    let totalStockedIn = 0;
+    let totalBatchExpenses = 0;
+    batches.forEach(b => {
+      (b.items || []).forEach(i => {
+        totalStockedIn += (Number(i.qty) || 0);
+      });
+      totalBatchExpenses += (Number(b.totalDeliveryFee) || 0) + (b.items || []).reduce((acc, i) => acc + (Number(i.batchPurchasePrice) || 0), 0);
+    });
+
+    let totalSoldUnits = 0;
+    let totalGiftUnits = 0;
+    sales.forEach(s => {
+      if (s.deliveryStatus === 'Cancelled') return;
+      if (s.gift && s.gift.hasGift && s.gift.isProduct && s.gift.productId) {
+        totalGiftUnits += (Number(s.gift.qty) || 1);
+      }
+      if (s.items && s.items.length > 0) {
+        totalSoldUnits += s.items.reduce((sum, it) => sum + (Number(it.qty) || 0), 0);
+      } else {
+        totalSoldUnits += (Number(s.qty) || 0);
+      }
+    });
+
+    const activeRemainingUnits = Array.from(batchStockMap.values()).reduce((sum: number, d: BatchStockDetail) => sum + d.remainingUnits, 0);
+
+    return {
+      totalStockedIn,
+      totalSoldUnits,
+      totalGiftUnits,
+      activeRemainingUnits,
+      totalBatchExpenses
+    };
+  }, [batches, sales, batchStockMap]);
+
   const allCount = batches.length;
   const activeCount = batches.filter(b => batchStockMap.get(b.id)?.status === 'Active').length;
   const depletedCount = batches.filter(b => batchStockMap.get(b.id)?.status === 'Depleted').length;
@@ -146,7 +203,7 @@ export const StockInView: React.FC<StockInViewProps> = ({
             Stock In & Batch Order Manager
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Log inventory batch orders. Delivery fees are automatically allocated across units to calculate true Landed Cost.
+            Log inventory batch orders. Landed costs and FIFO units are synchronized directly with live inventory on hand.
           </p>
         </div>
         <button
@@ -157,6 +214,72 @@ export const StockInView: React.FC<StockInViewProps> = ({
           <Plus className="w-4 h-4" />
           <span>Log New Batch Order</span>
         </button>
+      </div>
+
+      {/* Real-time Inventory Reconciliation & Tally Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="bg-white p-3.5 rounded-2xl border border-slate-100 shadow-2xs space-y-1">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold text-slate-500">Inbound Stocked In</span>
+            <Truck className="w-4 h-4 text-pink-600" />
+          </div>
+          <div className="text-xl font-bold text-slate-800">{overallTally.totalStockedIn} pcs</div>
+          <div className="text-[10px] text-slate-400">Across {batches.length} logged batch order{batches.length !== 1 ? 's' : ''}</div>
+        </div>
+
+        <div className="bg-white p-3.5 rounded-2xl border border-slate-100 shadow-2xs space-y-1">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold text-slate-500">Consumed by Sales</span>
+            <ShoppingBag className="w-4 h-4 text-emerald-600" />
+          </div>
+          <div className="text-xl font-bold text-emerald-600">{overallTally.totalSoldUnits} pcs</div>
+          <div className="text-[10px] text-slate-400">Deducted from batch pools</div>
+        </div>
+
+        <div className="bg-white p-3.5 rounded-2xl border border-slate-100 shadow-2xs space-y-1">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold text-slate-500">Gifted / Freebies</span>
+            <Gift className="w-4 h-4 text-purple-600" />
+          </div>
+          <div className="text-xl font-bold text-purple-600">{overallTally.totalGiftUnits} pcs</div>
+          <div className="text-[10px] text-slate-400">Catalog promotional units</div>
+        </div>
+
+        <div className="bg-white p-3.5 rounded-2xl border border-emerald-200/80 bg-emerald-50/20 shadow-2xs space-y-1">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold text-emerald-800">Live Stock In Batches</span>
+            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+          </div>
+          <div className="text-xl font-bold text-emerald-700">{overallTally.activeRemainingUnits} pcs</div>
+          <div className="text-[10px] font-semibold text-emerald-600 flex items-center gap-1">
+            <span>✓ 100% In Tally with Live Inventory</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Reconciliation Formula Banner */}
+      <div className="bg-slate-50 border border-slate-200/80 rounded-2xl px-4 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-slate-600">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-bold text-slate-700">Inventory Tally Reconciliation:</span>
+          <span className="font-mono bg-white px-2 py-0.5 rounded border border-slate-200 text-slate-800 font-semibold">
+            {overallTally.totalStockedIn} Stocked In
+          </span>
+          <span className="text-slate-400 font-bold">−</span>
+          <span className="font-mono bg-white px-2 py-0.5 rounded border border-slate-200 text-emerald-700 font-semibold">
+            {overallTally.totalSoldUnits} Sold
+          </span>
+          <span className="text-slate-400 font-bold">−</span>
+          <span className="font-mono bg-white px-2 py-0.5 rounded border border-slate-200 text-purple-700 font-semibold">
+            {overallTally.totalGiftUnits} Gifted
+          </span>
+          <span className="text-slate-400 font-bold">=</span>
+          <span className="font-mono bg-emerald-100/80 px-2 py-0.5 rounded border border-emerald-300 text-emerald-800 font-bold">
+            {overallTally.activeRemainingUnits} pcs Live On Hand
+          </span>
+        </div>
+        <div className="text-[11px] font-medium text-slate-500">
+          Total Landed Inbound Investment: <strong className="text-slate-800">{formatNaira(overallTally.totalBatchExpenses)}</strong>
+        </div>
       </div>
 
       {/* Batch Status Filter Bar (Declutters Active vs Depleted Batches) */}

@@ -40,11 +40,11 @@ export const InteractiveTour: React.FC<InteractiveTourProps> = ({
     },
     {
       title: 'Product Master Catalog',
-      subtitle: 'Define formulas, packaging, and gift costs.',
+      subtitle: 'Auto-generated SKUs and unit landed costs.',
       icon: Tag,
       tab: 'products',
       content:
-        'Every beauty SKU (gloss, liner, balm, scrub) stores base unit landed costs along with component packaging costs (boxes, shrink wrap) and free gift inserts (scrunchies, candy).',
+        'Every beauty SKU (gloss, liner, balm, scrub) automatically generates a standardized SKU code based on product name and category, storing base unit landed costs and catalog selling prices.',
       tip: 'The app calculates gross vs net profit margin percentages automatically.'
     },
     {
@@ -66,13 +66,13 @@ export const InteractiveTour: React.FC<InteractiveTourProps> = ({
       tip: 'Selling a combo automatically decrements stock for each underlying item.'
     },
     {
-      title: 'Multi-Channel Sales Log',
-      subtitle: 'Track revenue from Snapchat, Instagram DMs, WhatsApp, Website, and Pop-ups.',
+      title: 'Multi-Channel Sales & Order Status Tracking',
+      subtitle: 'Track payment, delivery logistics, and revenue across all channels.',
       icon: ShoppingBag,
       tab: 'sales',
       content:
-        'Record orders in seconds. The app computes the exact revenue and net profit per transaction, while keeping track of customer names and order channels.',
-      tip: 'Filter sales by date range, category, or specific SKU using the filter bar.'
+        'Record orders with cart-style multi-item sales, single-order packaging costs, and promotional gifts. Update Payment (Paid/Pending/Partial) and Delivery (Delivered/Shipped/Processing/Cancelled) statuses directly from the sales table.',
+      tip: 'Cancelled orders automatically protect and restore your warehouse inventory stock.'
     },
     {
       title: 'Live Inventory & Alerts',

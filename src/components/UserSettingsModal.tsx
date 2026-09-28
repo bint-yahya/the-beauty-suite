@@ -1,5 +1,5 @@
 import React from 'react';
-import { Palette, Check, Sparkles, X, Sun, Moon, Eye, Trash2, LogOut, ShieldAlert, User, Tag } from 'lucide-react';
+import { Palette, Check, Sparkles, X, Sun, Moon, Eye, Trash2, LogOut, ShieldAlert, User, Share2 } from 'lucide-react';
 import { AccentPresetId, ACCENT_PRESETS } from '../lib/theme';
 import { UserProfile } from '../lib/auth';
 
@@ -11,10 +11,10 @@ interface UserSettingsModalProps {
   isDarkMode: boolean;
   onToggleDarkMode: (isDark: boolean) => void;
   currentUser: UserProfile | null;
+  salesChannelsCount?: number;
+  onOpenManageChannels?: () => void;
   onOpenDeleteAccount?: () => void;
   onLogout?: () => void;
-  salesChannels?: string[];
-  onOpenManageChannels?: () => void;
 }
 
 export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
@@ -25,10 +25,10 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
   isDarkMode,
   onToggleDarkMode,
   currentUser,
+  salesChannelsCount,
+  onOpenManageChannels,
   onOpenDeleteAccount,
-  onLogout,
-  salesChannels,
-  onOpenManageChannels
+  onLogout
 }) => {
   if (!isOpen) return null;
 
@@ -225,41 +225,43 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
           </div>
         </div>
 
-        {/* Sales Channels Configuration Shortcut */}
-        {onOpenManageChannels && (
-          <div className="bg-slate-50 border border-slate-200/90 rounded-2xl p-4 space-y-2.5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Tag className="w-4 h-4 text-pink-500" />
-                <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                  Sales Channels
-                </span>
-              </div>
-              {salesChannels && (
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-pink-100 text-pink-700">
-                  {salesChannels.length} Channels
-                </span>
-              )}
+        {/* Operational Settings: Sales Channels & Distribution */}
+        <div className="bg-slate-50 border border-slate-200/90 rounded-2xl p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Share2 className="w-4 h-4 text-slate-500" />
+              <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                Sales Channels & Distribution
+              </span>
             </div>
-
-            <div className="bg-white p-3 rounded-xl border border-slate-200/80 flex items-center justify-between gap-3">
-              <p className="text-xs text-slate-600 leading-snug">
-                Configure your order channels (Instagram DM, WhatsApp, Website, TikTok, Pop-Up Fairs).
-              </p>
-              <button
-                id="btn-settings-open-channels"
-                type="button"
-                onClick={() => {
-                  onClose();
-                  onOpenManageChannels();
-                }}
-                className="px-3 py-1.5 rounded-xl bg-pink-500 hover:bg-pink-600 text-white font-semibold text-xs shrink-0 cursor-pointer shadow-xs shadow-pink-200 transition-colors"
-              >
-                Manage
-              </button>
-            </div>
+            {salesChannelsCount !== undefined && (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-pink-100 text-pink-700">
+                {salesChannelsCount} Channels
+              </span>
+            )}
           </div>
-        )}
+          <p className="text-xs text-slate-500">
+            Customize the channels you sell through (Instagram, WhatsApp, Pop-Ups, Website, etc.) to organize multi-channel revenue and order forms.
+          </p>
+          {onOpenManageChannels && (
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                onOpenManageChannels();
+              }}
+              className="w-full py-2 px-3 bg-white border border-slate-200 hover:border-pink-300 rounded-xl text-xs font-semibold text-slate-700 hover:text-pink-600 flex items-center justify-between transition-colors shadow-2xs cursor-pointer group"
+            >
+              <span className="flex items-center gap-1.5">
+                <Share2 className="w-3.5 h-3.5 text-pink-500 group-hover:scale-110 transition-transform" />
+                <span>Manage Sales Channels (Add, Edit, Delete)</span>
+              </span>
+              <span className="text-pink-600 text-xs font-bold flex items-center gap-0.5">
+                Open &rarr;
+              </span>
+            </button>
+          )}
+        </div>
 
         {/* Account Management & Danger Zone */}
         {currentUser && (

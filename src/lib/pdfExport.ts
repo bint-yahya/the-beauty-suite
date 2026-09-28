@@ -726,6 +726,14 @@ export const generateBusinessReportPDF = (
       if (s.packagingCost !== undefined && s.packagingCost > 0) {
         itemName += ` [Pkg: ${formatPDFCurrency(s.packagingCost)}]`;
       }
+      if (s.gift) {
+        if (s.gift.isProduct) {
+          const gp = products.find(p => p.id === s.gift?.productId);
+          itemName += ` [Gift: ${gp?.name || 'Product'} ×${s.gift.qty || 1} (${formatPDFCurrency(s.gift.cost)})]`;
+        } else {
+          itemName += ` [Gift: ${s.gift.customDescription || 'Custom'} (${formatPDFCurrency(s.gift.cost)})]`;
+        }
+      }
 
       const isMulti = Boolean(s.items && s.items.length > 1);
       const typeLabel = s.type === 'combo' ? 'Bundle' : isMulti ? 'Multi-Item' : 'Single';
@@ -740,7 +748,8 @@ export const generateBusinessReportPDF = (
         itemName,
         typeLabel,
         s.customer || 'Direct',
-        s.channel || 'Direct',
+        s.paymentStatus || 'Paid',
+        s.deliveryStatus || 'Delivered',
         qty.toString(),
         unitPriceDisplay,
         formatPDFCurrency(totalRev),
@@ -750,7 +759,7 @@ export const generateBusinessReportPDF = (
 
     autoTable(doc, {
       startY: currentY,
-      head: [['Date', 'ID', 'Item Description', 'Type', 'Customer', 'Channel', 'Qty', 'Unit Price', 'Total Rev', 'Net Profit']],
+      head: [['Date', 'ID', 'Item Description', 'Type', 'Customer', 'Payment', 'Delivery', 'Qty', 'Unit Price', 'Total Rev', 'Net Profit']],
       body: salesRows,
       theme: 'striped',
       headStyles: {
@@ -769,10 +778,12 @@ export const generateBusinessReportPDF = (
         0: { fontStyle: 'normal' },
         1: { fontStyle: 'bold' },
         2: { fontStyle: 'bold' },
-        6: { halign: 'right' },
+        5: { halign: 'center', fontStyle: 'bold' },
+        6: { halign: 'center' },
         7: { halign: 'right' },
-        8: { halign: 'right', fontStyle: 'bold' },
-        9: { halign: 'right', fontStyle: 'bold', textColor: [21, 128, 61] }
+        8: { halign: 'right' },
+        9: { halign: 'right', fontStyle: 'bold' },
+        10: { halign: 'right', fontStyle: 'bold', textColor: [21, 128, 61] }
       },
       margin: { left: 14, right: 14 }
     });
@@ -805,6 +816,7 @@ export const generateBusinessReportPDF = (
         p.category,
         `${st.totalStockedIn} pcs`,
         `${st.totalSold} pcs`,
+        `${st.totalGifted || 0} pcs`,
         `${st.currentStock} pcs`,
         formatPDFCurrency(breakdown.totalCost),
         formatPDFCurrency(p.sellingPrice),
@@ -816,7 +828,7 @@ export const generateBusinessReportPDF = (
 
     autoTable(doc, {
       startY: currentY,
-      head: [['SKU', 'Product Name', 'Category', 'Stock In', 'Sold', 'On Hand', 'Unit Cost', 'Sell Price', 'Margin %', 'Asset Value', 'Status']],
+      head: [['SKU', 'Product Name', 'Category', 'Stock In', 'Sold', 'Gifted', 'On Hand', 'Unit Cost', 'Sell Price', 'Margin %', 'Asset Value', 'Status']],
       body: inventoryRows,
       theme: 'grid',
       headStyles: {
@@ -836,12 +848,13 @@ export const generateBusinessReportPDF = (
         1: { fontStyle: 'bold' },
         3: { halign: 'right' },
         4: { halign: 'right' },
-        5: { halign: 'right', fontStyle: 'bold' },
-        6: { halign: 'right' },
+        5: { halign: 'right' },
+        6: { halign: 'right', fontStyle: 'bold' },
         7: { halign: 'right' },
         8: { halign: 'right' },
-        9: { halign: 'right', fontStyle: 'bold', textColor: palette.dark },
-        10: { halign: 'center', fontStyle: 'bold' }
+        9: { halign: 'right' },
+        10: { halign: 'right', fontStyle: 'bold', textColor: palette.dark },
+        11: { halign: 'center', fontStyle: 'bold' }
       },
       margin: { left: 14, right: 14 }
     });

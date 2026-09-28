@@ -66,7 +66,7 @@ export const CostingView: React.FC<CostingViewProps> = ({
             Single Product Unit Costing & Profit Margin Engine
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Landed costs, packaging, freebies & overheads to calculate net margin percentages.
+            Unit landed costs, selling prices, and catalog gross & net profit margins.
           </p>
         </div>
 
@@ -103,30 +103,19 @@ export const CostingView: React.FC<CostingViewProps> = ({
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2 text-xs bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                  <div className="grid grid-cols-3 gap-2 text-xs bg-slate-50 p-2.5 rounded-xl border border-slate-100">
                     <div>
                       <span className="text-slate-400 text-[10px] block">Landed Cost</span>
                       <span className="font-semibold text-slate-700">{formatNaira(prod.unitLandedCost)}</span>
                     </div>
                     <div>
-                      <span className="text-slate-400 text-[10px] block">Packaging & Extras</span>
-                      <span className="font-semibold text-slate-700">
-                        {formatNaira((prod.packagingCost || 0) + (prod.giftCost || 0) + (prod.miscCost || 0))}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 text-[10px] block">Total Unit Cost</span>
-                      <span className="font-bold text-slate-800">{formatNaira(breakdown.totalCost)}</span>
-                    </div>
-                    <div>
                       <span className="text-slate-400 text-[10px] block">Selling Price</span>
                       <span className="font-bold text-slate-800">{formatNaira(prod.sellingPrice)}</span>
                     </div>
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs pt-0.5">
-                    <span className="text-slate-500 font-medium">Net Profit / Unit:</span>
-                    <span className="font-bold text-emerald-600 text-sm">{formatNaira(breakdown.netProfit)}</span>
+                    <div>
+                      <span className="text-slate-400 text-[10px] block">Net Profit / Unit</span>
+                      <span className="font-bold text-emerald-600">{formatNaira(breakdown.netProfit)}</span>
+                    </div>
                   </div>
                 </div>
               );
@@ -139,13 +128,10 @@ export const CostingView: React.FC<CostingViewProps> = ({
               <thead className="bg-slate-50 border-b border-slate-200/80 text-slate-500 font-semibold uppercase text-[10px] tracking-wider">
                 <tr>
                   <th className="py-3 px-3">Product</th>
+                  <th className="py-3 px-3">Category</th>
                   <th className="py-3 px-3 text-right">Landed Cost</th>
-                  <th className="py-3 px-3 text-right">Packaging</th>
-                  <th className="py-3 px-3 text-right">Freebie/Gift</th>
-                  <th className="py-3 px-3 text-right">Misc</th>
-                  <th className="py-3 px-3 text-right font-bold text-slate-700 bg-slate-100/60">Total Cost</th>
                   <th className="py-3 px-3 text-right font-bold">Selling Price</th>
-                  <th className="py-3 px-3 text-right font-bold text-emerald-600">Net Profit</th>
+                  <th className="py-3 px-3 text-right font-bold text-emerald-600">Unit Net Profit</th>
                   <th className="py-3 px-3 text-right">Margin %</th>
                 </tr>
               </thead>
@@ -154,14 +140,12 @@ export const CostingView: React.FC<CostingViewProps> = ({
                   const breakdown = getProductCostBreakdown(prod);
                   return (
                     <tr key={prod.id} className="hover:bg-pink-50/30 transition-colors">
-                      <td className="py-3 px-3 font-semibold text-slate-800">{prod.name}</td>
-                      <td className="py-3 px-3 text-right font-medium text-slate-600">{formatNaira(prod.unitLandedCost)}</td>
-                      <td className="py-3 px-3 text-right text-slate-500">{formatNaira(prod.packagingCost)}</td>
-                      <td className="py-3 px-3 text-right text-slate-500">{formatNaira(prod.giftCost)}</td>
-                      <td className="py-3 px-3 text-right text-slate-500">{formatNaira(prod.miscCost)}</td>
-                      <td className="py-3 px-3 text-right font-bold text-slate-800 bg-slate-50">
-                        {formatNaira(breakdown.totalCost)}
+                      <td className="py-3 px-3 font-semibold text-slate-800">
+                        <span className="font-mono text-pink-600 font-bold mr-1.5">{prod.code}</span>
+                        {prod.name}
                       </td>
+                      <td className="py-3 px-3 text-slate-500">{prod.category}</td>
+                      <td className="py-3 px-3 text-right font-medium text-slate-600">{formatNaira(prod.unitLandedCost)}</td>
                       <td className="py-3 px-3 text-right font-bold text-slate-800">
                         {formatNaira(prod.sellingPrice)}
                       </td>

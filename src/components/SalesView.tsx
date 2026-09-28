@@ -1,58 +1,37 @@
 import React, { useState } from 'react';
-import { ShoppingBag, Plus, Search, Trash2, Pencil, RotateCcw, FileText, FilterX, AlertCircle, Package, Tag, Filter } from 'lucide-react';
+import { ShoppingBag, Plus, Search, Trash2, Pencil, RotateCcw, FileText, FilterX, AlertCircle, Package, Gift, CheckCircle2, Clock, Truck, ChevronDown, Share2 } from 'lucide-react';
 import {
   SaleRecord,
   ProductItem,
   ComboItem,
+  PaymentStatus,
+  DeliveryStatus,
+  SalesChannel,
+  DEFAULT_SALES_CHANNELS,
+  resolveChannelBadge,
   formatNaira,
   getSaleTotalRevenue,
   getSaleTotalQty,
-  getSaleProfit as calculateSaleProfit,
-  DEFAULT_SALES_CHANNELS
+  getSaleProfit as calculateSaleProfit
 } from '../types';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
-
-export const getChannelBadgeClass = (channel?: string) => {
-  if (!channel) return 'bg-slate-100 text-slate-600 border border-slate-200';
-  const ch = channel.toLowerCase();
-  if (ch.includes('instagram') || ch.includes('ig')) {
-    return 'bg-pink-100 text-pink-700 border border-pink-200';
-  }
-  if (ch.includes('whatsapp') || ch.includes('wa')) {
-    return 'bg-emerald-50 text-emerald-700 border border-emerald-200';
-  }
-  if (ch.includes('snapchat') || ch.includes('snap')) {
-    return 'bg-amber-100/80 text-amber-800 border border-amber-200';
-  }
-  if (ch.includes('tiktok')) {
-    return 'bg-violet-100 text-violet-700 border border-violet-200';
-  }
-  if (ch.includes('website') || ch.includes('shopify') || ch.includes('online') || ch.includes('store') || ch.includes('etsy')) {
-    return 'bg-blue-50 text-blue-700 border border-blue-200';
-  }
-  if (ch.includes('fair') || ch.includes('pop-up') || ch.includes('market') || ch.includes('walk-in') || ch.includes('in-person')) {
-    return 'bg-orange-50 text-orange-700 border border-orange-200';
-  }
-  return 'bg-slate-100 text-slate-700 border border-slate-200';
-};
 
 interface SalesViewProps {
   sales: SaleRecord[];
   filteredSales: SaleRecord[];
   products: ProductItem[];
   combos: ComboItem[];
+  salesChannels?: SalesChannel[];
   onOpenRecordSale: () => void;
   onRepeatLastSale?: () => void;
   onEditSale?: (sale: SaleRecord) => void;
+  onUpdateSaleStatus?: (saleId: string, paymentStatus?: PaymentStatus, deliveryStatus?: DeliveryStatus) => void;
   onOpenExportReport?: () => void;
+  onOpenManageChannels?: () => void;
   onDeleteSale: (id: string) => void;
   onResetFilters?: () => void;
   getProductCostBreakdown: (p: ProductItem) => any;
   getComboCostBreakdown: (c: ComboItem) => any;
-  salesChannels?: string[];
-  channelFilter?: string;
-  onChannelFilterChange?: (channel: string) => void;
-  onOpenManageChannels?: () => void;
 }
 
 export const SalesView: React.FC<SalesViewProps> = ({
@@ -60,42 +39,59 @@ export const SalesView: React.FC<SalesViewProps> = ({
   filteredSales,
   products,
   combos,
+  salesChannels = DEFAULT_SALES_CHANNELS,
   onOpenRecordSale,
   onRepeatLastSale,
   onEditSale,
+  onUpdateSaleStatus,
   onOpenExportReport,
+  onOpenManageChannels,
   onDeleteSale,
   onResetFilters,
   getProductCostBreakdown,
-  getComboCostBreakdown,
-  salesChannels = DEFAULT_SALES_CHANNELS,
-  channelFilter: channelFilterProp,
-  onChannelFilterChange,
-  onOpenManageChannels
+  getComboCostBreakdown
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [localChannelFilter, setLocalChannelFilter] = useState<string>('all');
+  const [paymentFilter, setPaymentFilter] = useState<string>('all');
+  const [deliveryFilter, setDeliveryFilter] = useState<string>('all');
+  const [channelFilter, setChannelFilter] = useState<string>('all');
   const [saleToDelete, setSaleToDelete] = useState<SaleRecord | null>(null);
 
-  const channelFilter = channelFilterProp !== undefined ? channelFilterProp : localChannelFilter;
-
-  const handleSetChannelFilter = (ch: string) => {
-    setLocalChannelFilter(ch);
-    if (onChannelFilterChange) {
-      onChannelFilterChange(ch);
-    }
-  };
+  const channelFilterOptions = React.useMemo(() => {
+    const list: string[] = [];
+    const seen = new Set<string>();
+    (salesChannels || []).forEach(c => {
+      if (c.name && !seen.has(c.name)) {
+        seen.add(c.name);
+        list.push(c.name);
+      }
+    });
+    (sales || []).forEach(s => {
+      if (s.channel && s.channel.trim() && !seen.has(s.channel.trim())) {
+        seen.add(s.channel.trim());
+        list.push(s.channel.trim());
+      }
+    });
+    return list;
+  }, [salesChannels, sales]);
 
   const displaySales = filteredSales.filter(s => {
-    if (channelFilter !== 'all' && (s.channel || 'Direct') !== channelFilter) {
-      return false;
-    }
+    const pay = s.paymentStatus || 'Paid';
+    const del = s.deliveryStatus || 'Delivered';
+    const ch = s.channel || 'Direct / Walk-In';
+
+    if (paymentFilter !== 'all' && pay !== paymentFilter) return false;
+    if (deliveryFilter !== 'all' && del !== deliveryFilter) return false;
+    if (channelFilter !== 'all' && ch !== channelFilter) return false;
+
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     return (
       (s.customer && s.customer.toLowerCase().includes(q)) ||
       (s.channel && s.channel.toLowerCase().includes(q)) ||
-      s.id.toLowerCase().includes(q)
+      s.id.toLowerCase().includes(q) ||
+      pay.toLowerCase().includes(q) ||
+      del.toLowerCase().includes(q)
     );
   });
 
@@ -107,19 +103,86 @@ export const SalesView: React.FC<SalesViewProps> = ({
     if (sale.items && sale.items.length > 0) {
       if (sale.items.length === 1) {
         const prod = products.find(p => p.id === sale.items![0].productId);
-        return prod ? prod.name : 'Unknown Product';
+        return prod ? prod.name : (sale.items![0].productName || sale.itemNameSnapshot || 'Catalog Product');
       }
       return `${sale.items.length} Products Order`;
     }
     const prod = products.find(p => p.id === sale.itemId);
-    return prod ? prod.name : 'Unknown Product';
+    return prod ? prod.name : (sale.itemNameSnapshot || 'Catalog Product');
   };
 
   const getSaleProfit = (sale: SaleRecord) => {
     return calculateSaleProfit(sale, products, combos);
   };
 
-  const isFilterActive = filteredSales.length !== sales.length;
+  const getPaymentBadge = (status?: PaymentStatus) => {
+    const s = status || 'Paid';
+    switch (s) {
+      case 'Paid':
+        return {
+          bg: 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100/70',
+          dot: 'bg-emerald-500',
+          label: 'Paid'
+        };
+      case 'Partially Paid':
+        return {
+          bg: 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100/70',
+          dot: 'bg-blue-500',
+          label: 'Partial'
+        };
+      case 'Pending':
+      default:
+        return {
+          bg: 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100/70',
+          dot: 'bg-amber-500',
+          label: 'Pending'
+        };
+    }
+  };
+
+  const getDeliveryBadge = (status?: DeliveryStatus) => {
+    const s = status || 'Delivered';
+    switch (s) {
+      case 'Delivered':
+        return {
+          bg: 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100/70',
+          dot: 'bg-emerald-500',
+          label: 'Delivered'
+        };
+      case 'Shipped':
+        return {
+          bg: 'bg-sky-50 text-sky-700 border-sky-200 hover:bg-sky-100/70',
+          dot: 'bg-sky-500',
+          label: 'Shipped'
+        };
+      case 'Processing':
+        return {
+          bg: 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100/70',
+          dot: 'bg-purple-500',
+          label: 'Processing'
+        };
+      case 'Pending':
+        return {
+          bg: 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100/70',
+          dot: 'bg-amber-500',
+          label: 'Pending'
+        };
+      case 'Cancelled':
+        return {
+          bg: 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100/70',
+          dot: 'bg-rose-500',
+          label: 'Cancelled'
+        };
+      default:
+        return {
+          bg: 'bg-slate-50 text-slate-700 border-slate-200',
+          dot: 'bg-slate-400',
+          label: s
+        };
+    }
+  };
+
+  const isFilterActive = filteredSales.length !== sales.length || paymentFilter !== 'all' || deliveryFilter !== 'all';
 
   return (
     <div className="space-y-6 animate-in fade-in duration-150">
@@ -136,15 +199,16 @@ export const SalesView: React.FC<SalesViewProps> = ({
         <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
           {onOpenManageChannels && (
             <button
-              id="btn-manage-channels-sales-view"
+              id="btn-manage-channels"
+              type="button"
               onClick={onOpenManageChannels}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white hover:bg-pink-50 border border-slate-200 hover:border-pink-300 text-slate-700 text-xs sm:text-sm font-semibold rounded-xl shadow-2xs transition-all cursor-pointer"
+              className="inline-flex items-center gap-2 px-3.5 py-2 bg-white hover:bg-pink-50 border border-slate-200 hover:border-pink-300 text-slate-700 hover:text-pink-600 text-xs sm:text-sm font-semibold rounded-xl shadow-2xs transition-all cursor-pointer"
               title="Add, edit, or delete sales channels"
             >
-              <Tag className="w-4 h-4 text-pink-600" />
-              <span>Channels</span>
-              {salesChannels && salesChannels.length > 0 && (
-                <span className="text-[10px] font-bold px-1.5 py-0.2 rounded-full bg-pink-100 text-pink-700">
+              <Share2 className="w-4 h-4 text-pink-500" />
+              <span>Sales Channels</span>
+              {salesChannels && (
+                <span className="text-[10px] px-1.5 py-0.2 bg-pink-100 text-pink-700 rounded-md font-bold">
                   {salesChannels.length}
                 </span>
               )}
@@ -207,126 +271,90 @@ export const SalesView: React.FC<SalesViewProps> = ({
       )}
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        {/* Interactive Channel Filter Pills Bar */}
-        {salesChannels && salesChannels.length > 0 && (
-          <div className="bg-slate-50/70 border-b border-slate-100 px-4 py-2.5 flex items-center justify-between gap-3 overflow-x-auto">
-            <div className="flex items-center gap-1.5 flex-nowrap shrink-0">
-              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mr-1 flex items-center gap-1">
-                <Tag className="w-3.5 h-3.5 text-pink-500" /> Channel:
-              </span>
-              <button
-                id="filter-channel-pill-all"
-                type="button"
-                onClick={() => handleSetChannelFilter('all')}
-                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
-                  channelFilter === 'all'
-                    ? 'bg-slate-900 text-white shadow-2xs font-bold'
-                    : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
-                }`}
-              >
-                <span>All</span>
-                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
-                  channelFilter === 'all' ? 'bg-slate-800 text-slate-200' : 'bg-slate-100 text-slate-600'
-                }`}>
-                  {filteredSales.length}
-                </span>
-              </button>
-
-              {salesChannels.map((ch) => {
-                const count = filteredSales.filter(s => (s.channel || 'Direct') === ch).length;
-                const isSelected = channelFilter === ch;
-                return (
-                  <button
-                    key={ch}
-                    id={`filter-channel-pill-${ch.replace(/\s+/g, '-').toLowerCase()}`}
-                    type="button"
-                    onClick={() => handleSetChannelFilter(isSelected ? 'all' : ch)}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
-                      isSelected
-                        ? 'bg-pink-600 text-white shadow-2xs font-bold'
-                        : 'bg-white text-slate-700 hover:bg-pink-50 border border-slate-200 hover:border-pink-300'
-                    }`}
-                    title={`Filter sales by ${ch}`}
-                  >
-                    <span>{ch}</span>
-                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
-                      isSelected ? 'bg-pink-700 text-white' : 'bg-slate-100 text-slate-600'
-                    }`}>
-                      {count}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-
-            {onOpenManageChannels && (
-              <button
-                id="btn-inline-manage-channels-link"
-                type="button"
-                onClick={onOpenManageChannels}
-                className="text-xs text-pink-600 hover:text-pink-700 font-bold hover:underline shrink-0 ml-2 cursor-pointer flex items-center gap-1"
-                title="Add, edit, or delete sales channels"
-              >
-                <span>⚙️ Manage Channels</span>
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* Sleek Search bar with Channel Filter */}
-        <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 flex-1">
-            <div className="flex items-center bg-slate-100 rounded-full px-4 py-1.5 flex-1 sm:max-w-xs">
+        {/* Sleek Search bar and Status Filters */}
+        <div className="p-4 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2.5 flex-1">
+            <div className="flex items-center bg-slate-100 rounded-full px-4 py-1.5 w-full sm:w-72">
               <Search className="w-4 h-4 text-slate-400 mr-2 shrink-0" />
               <input
-                id="input-search-sales"
                 type="text"
-                placeholder="Search by customer, channel, or ID..."
+                placeholder="Search customer, channel, status, ID..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="bg-transparent border-none text-xs outline-none w-full text-slate-700 font-medium"
               />
             </div>
 
-            {/* Sales Channel Filter Selector */}
-            {salesChannels && salesChannels.length > 0 && (
-              <div className="flex items-center gap-1.5 shrink-0">
-                <Filter className="w-3.5 h-3.5 text-slate-400 hidden sm:inline" />
+            {/* Quick Status Filters */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="relative">
                 <select
-                  id="select-channel-filter"
-                  value={channelFilter}
-                  onChange={(e) => handleSetChannelFilter(e.target.value)}
-                  className="bg-slate-100 hover:bg-slate-200/70 border border-slate-200/80 rounded-xl px-2.5 py-1.5 text-xs font-semibold text-slate-700 outline-none cursor-pointer"
-                  title="Filter sales transactions by sales channel"
+                  aria-label="Filter sales by payment status"
+                  value={paymentFilter}
+                  onChange={(e) => setPaymentFilter(e.target.value)}
+                  className="appearance-none bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-semibold rounded-xl pl-3 pr-7 py-1.5 focus:outline-hidden focus:border-pink-500 cursor-pointer transition-colors shadow-2xs"
                 >
-                  <option value="all">All Channels ({filteredSales.length})</option>
-                  {salesChannels.map((ch) => {
-                    const count = filteredSales.filter(s => (s.channel || 'Direct') === ch).length;
-                    return (
-                      <option key={ch} value={ch}>
-                        {ch} ({count})
-                      </option>
-                    );
-                  })}
+                  <option value="all">All Payments</option>
+                  <option value="Paid">Paid</option>
+                  <option value="Pending">Payment Pending</option>
+                  <option value="Partially Paid">Partially Paid</option>
                 </select>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2 top-2 pointer-events-none" />
               </div>
-            )}
+
+              <div className="relative">
+                <select
+                  aria-label="Filter sales by delivery status"
+                  value={deliveryFilter}
+                  onChange={(e) => setDeliveryFilter(e.target.value)}
+                  className="appearance-none bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-semibold rounded-xl pl-3 pr-7 py-1.5 focus:outline-hidden focus:border-pink-500 cursor-pointer transition-colors shadow-2xs"
+                >
+                  <option value="all">All Deliveries</option>
+                  <option value="Delivered">Delivered</option>
+                  <option value="Shipped">Shipped</option>
+                  <option value="Processing">Processing</option>
+                  <option value="Pending">Dispatch Pending</option>
+                  <option value="Cancelled">Cancelled</option>
+                </select>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2 top-2 pointer-events-none" />
+              </div>
+
+              <div className="relative">
+                <select
+                  aria-label="Filter sales by channel"
+                  value={channelFilter}
+                  onChange={(e) => setChannelFilter(e.target.value)}
+                  className="appearance-none bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-semibold rounded-xl pl-3 pr-7 py-1.5 focus:outline-hidden focus:border-pink-500 cursor-pointer transition-colors shadow-2xs"
+                >
+                  <option value="all">All Channels</option>
+                  {channelFilterOptions.map((chName) => (
+                    <option key={chName} value={chName}>
+                      {chName}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2 top-2 pointer-events-none" />
+              </div>
+
+              {(paymentFilter !== 'all' || deliveryFilter !== 'all' || channelFilter !== 'all' || searchQuery) && (
+                <button
+                  onClick={() => {
+                    setPaymentFilter('all');
+                    setDeliveryFilter('all');
+                    setChannelFilter('all');
+                    setSearchQuery('');
+                  }}
+                  className="text-[11px] font-semibold text-pink-600 hover:text-pink-800 underline cursor-pointer"
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
           </div>
 
-          <div className="flex items-center justify-between sm:justify-end gap-3">
-            <span className="text-xs font-semibold text-slate-500">
-              Showing {displaySales.length} of {sales.length} records
-            </span>
-            {channelFilter !== 'all' && (
-              <button
-                id="btn-clear-channel-filter"
-                onClick={() => handleSetChannelFilter('all')}
-                className="text-xs font-bold text-pink-600 hover:underline cursor-pointer"
-              >
-                Clear Channel
-              </button>
-            )}
-          </div>
+          <span className="text-xs font-semibold text-slate-500 shrink-0">
+            Showing {displaySales.length} of {sales.length} records
+          </span>
         </div>
 
         {/* Mobile View: High-clarity Cards (Hidden on sm screens and up) */}
@@ -336,7 +364,7 @@ export const SalesView: React.FC<SalesViewProps> = ({
               <ShoppingBag className="w-8 h-8 mx-auto mb-2 opacity-30 text-pink-500" />
               <p className="font-semibold text-slate-600">No sales transactions found</p>
               <p className="text-[11px] text-slate-400 mt-0.5">
-                {isFilterActive ? 'Try adjusting your date/category filter above.' : 'Click "Record Sale" to log your first order.'}
+                {isFilterActive ? 'Try adjusting your date/category or status filter above.' : 'Click "Record Sale" to log your first order.'}
               </p>
               {isFilterActive && onResetFilters && (
                 <button
@@ -354,12 +382,14 @@ export const SalesView: React.FC<SalesViewProps> = ({
               const totalRev = getSaleTotalRevenue(sale);
               const netProfit = getSaleProfit(sale);
               const isMultiItem = Boolean(sale.items && sale.items.length > 1);
+              const payBadge = getPaymentBadge(sale.paymentStatus);
+              const delBadge = getDeliveryBadge(sale.deliveryStatus);
 
               return (
                 <div key={sale.id} className="p-4 space-y-3 hover:bg-pink-50/20 transition-colors">
                   <div className="flex items-start justify-between gap-2">
                     <div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="font-mono text-[10px] text-slate-400">{sale.id}</span>
                         <span className="text-xs text-slate-500 font-mono">{sale.date}</span>
                         <span className={`px-2 py-0.5 rounded-full text-[9px] font-semibold ${
@@ -380,21 +410,38 @@ export const SalesView: React.FC<SalesViewProps> = ({
                             const p = products.find(prod => prod.id === it.productId);
                             return (
                               <div key={idx} className="flex items-center gap-1.5 text-xs text-slate-800">
-                                <span className="font-bold">{p?.name || 'Product'}</span>
+                                <span className="font-bold">{p?.name || it.productName || sale.itemNameSnapshot || 'Catalog Product'}</span>
                                 <span className="text-pink-600 font-mono font-semibold text-[11px]">×{it.qty}</span>
                                 <span className="text-slate-400 text-[10px]">({formatNaira(it.unitPrice)})</span>
                               </div>
                             );
                           })}
-                          {sale.packagingCost !== undefined && sale.packagingCost > 0 && (
-                            <div className="text-[10px] text-pink-600 font-medium flex items-center gap-1 mt-0.5">
-                              <Package className="w-3 h-3" />
-                              <span>Packaging: {formatNaira(sale.packagingCost)}</span>
-                            </div>
-                          )}
                         </div>
                       ) : (
                         <h4 className="font-bold text-slate-800 text-sm mt-1">{getItemSummary(sale)}</h4>
+                      )}
+
+                      {/* Packaging & Gift Tags (Mobile) */}
+                      {( (sale.packagingCost !== undefined && sale.packagingCost > 0) || sale.gift ) && (
+                        <div className="mt-1.5 space-y-1 pt-1 border-t border-slate-100">
+                          {sale.packagingCost !== undefined && sale.packagingCost > 0 && (
+                            <div className="text-[10px] text-pink-700 font-medium flex items-center gap-1 bg-pink-50/60 px-2 py-0.5 rounded border border-pink-100/80 w-fit">
+                              <Package className="w-3 h-3 text-pink-500" />
+                              <span>Packaging: {formatNaira(sale.packagingCost)}</span>
+                            </div>
+                          )}
+                          {sale.gift && (
+                            <div className="text-[10px] text-purple-700 font-medium flex items-center gap-1 bg-purple-50/70 px-2 py-0.5 rounded border border-purple-100 w-fit">
+                              <Gift className="w-3 h-3 text-purple-500 shrink-0" />
+                              <span>
+                                Gift: {sale.gift.isProduct
+                                  ? `${products.find(p => p.id === sale.gift?.productId)?.name || sale.gift.productName || 'Gift Item'} ×${sale.gift.qty || 1}`
+                                  : (sale.gift.customDescription || sale.gift.description || 'Custom Gift')}
+                                {' '}(Cost: {formatNaira(sale.gift.cost)})
+                              </span>
+                            </div>
+                          )}
+                        </div>
                       )}
                     </div>
 
@@ -423,17 +470,56 @@ export const SalesView: React.FC<SalesViewProps> = ({
                     </div>
                   </div>
 
+                  {/* Payment & Delivery Quick Statuses on Mobile */}
+                  <div className="flex items-center gap-3 pt-1 border-t border-slate-100 flex-wrap">
+                    <div className="flex items-center gap-1 text-[11px]">
+                      <span className="text-slate-400 font-medium">Payment:</span>
+                      <div className="relative">
+                        <select
+                          aria-label={`Payment status for mobile sale ${sale.id}`}
+                          value={sale.paymentStatus || 'Paid'}
+                          onChange={(e) => onUpdateSaleStatus && onUpdateSaleStatus(sale.id, e.target.value as PaymentStatus, undefined)}
+                          className={`appearance-none text-[10px] font-bold pl-2 pr-5 py-0.5 rounded-full border cursor-pointer transition-colors ${payBadge.bg}`}
+                        >
+                          <option value="Paid">Paid</option>
+                          <option value="Pending">Pending</option>
+                          <option value="Partially Paid">Partial</option>
+                        </select>
+                        <ChevronDown className="w-3 h-3 opacity-60 absolute right-1 top-1 pointer-events-none" />
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 text-[11px]">
+                      <span className="text-slate-400 font-medium">Delivery:</span>
+                      <div className="relative">
+                        <select
+                          aria-label={`Delivery status for mobile sale ${sale.id}`}
+                          value={sale.deliveryStatus || 'Delivered'}
+                          onChange={(e) => onUpdateSaleStatus && onUpdateSaleStatus(sale.id, undefined, e.target.value as DeliveryStatus)}
+                          className={`appearance-none text-[10px] font-bold pl-2 pr-5 py-0.5 rounded-full border cursor-pointer transition-colors ${delBadge.bg}`}
+                        >
+                          <option value="Delivered">Delivered</option>
+                          <option value="Shipped">Shipped</option>
+                          <option value="Processing">Processing</option>
+                          <option value="Pending">Pending</option>
+                          <option value="Cancelled">Cancelled</option>
+                        </select>
+                        <ChevronDown className="w-3 h-3 opacity-60 absolute right-1 top-1 pointer-events-none" />
+                      </div>
+                    </div>
+                  </div>
+
                   <div className="flex items-center justify-between text-xs pt-1">
                     <div className="flex items-center gap-2">
                       <span className="text-slate-600 font-medium">{sale.customer || 'Direct Customer'}</span>
-                      <button
-                        type="button"
-                        onClick={() => handleSetChannelFilter(sale.channel || 'Direct')}
-                        className={`text-[10px] px-2 py-0.5 rounded font-medium transition-all hover:opacity-80 cursor-pointer ${getChannelBadgeClass(sale.channel)}`}
-                        title={`Filter sales by channel: ${sale.channel || 'Direct'}`}
-                      >
-                        {sale.channel || 'Direct'}
-                      </button>
+                      {(() => {
+                        const badge = resolveChannelBadge(sale.channel, salesChannels);
+                        return (
+                          <span className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded font-medium border ${badge.bg} ${badge.text} ${badge.border}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${badge.dot}`} />
+                            <span>{sale.channel || 'Direct'}</span>
+                          </span>
+                        );
+                      })()}
                     </div>
                     <span className="font-semibold text-slate-700">{totalQty} total unit(s)</span>
                   </div>
@@ -459,25 +545,27 @@ export const SalesView: React.FC<SalesViewProps> = ({
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-50 border-b border-slate-200/80 text-slate-500 font-semibold uppercase text-[10px] tracking-wider">
               <tr>
-                <th className="py-3 px-4">Date</th>
-                <th className="py-3 px-4">Item(s) Sold</th>
-                <th className="py-3 px-4">Type</th>
-                <th className="py-3 px-4">Customer / Channel</th>
-                <th className="py-3 px-4 text-right">Qty</th>
-                <th className="py-3 px-4 text-right">Unit Price</th>
-                <th className="py-3 px-4 text-right font-bold">Total Revenue</th>
-                <th className="py-3 px-4 text-right font-bold text-emerald-600">Net Profit</th>
-                <th className="py-3 px-4 text-center">Action</th>
+                <th className="py-3 px-3.5">Date</th>
+                <th className="py-3 px-3.5">Item(s) Sold</th>
+                <th className="py-3 px-3">Type</th>
+                <th className="py-3 px-3.5">Customer / Channel</th>
+                <th className="py-3 px-3">Payment</th>
+                <th className="py-3 px-3">Delivery</th>
+                <th className="py-3 px-3 text-right">Qty</th>
+                <th className="py-3 px-3 text-right">Unit Price</th>
+                <th className="py-3 px-3 text-right font-bold">Total Revenue</th>
+                <th className="py-3 px-3 text-right font-bold text-emerald-600">Net Profit</th>
+                <th className="py-3 px-3 text-center">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {displaySales.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="text-center py-10 text-slate-400">
+                  <td colSpan={11} className="text-center py-10 text-slate-400">
                     <ShoppingBag className="w-8 h-8 mx-auto mb-2 opacity-30 text-pink-500" />
                     <p className="font-semibold text-slate-600">No sales transactions found</p>
                     <p className="text-[11px] text-slate-400 mt-0.5">
-                      {isFilterActive ? 'Try adjusting your date/category filter above.' : 'Click "Record Sale" to log your first order.'}
+                      {isFilterActive ? 'Try adjusting your date/category or status filter above.' : 'Click "Record Sale" to log your first order.'}
                     </p>
                     {isFilterActive && onResetFilters && (
                       <button
@@ -496,43 +584,60 @@ export const SalesView: React.FC<SalesViewProps> = ({
                   const totalRev = getSaleTotalRevenue(sale);
                   const netProfit = getSaleProfit(sale);
                   const isMultiItem = Boolean(sale.items && sale.items.length > 1);
+                  const payBadge = getPaymentBadge(sale.paymentStatus);
+                  const delBadge = getDeliveryBadge(sale.deliveryStatus);
 
                   return (
                     <tr key={sale.id} className="hover:bg-pink-50/20 transition-colors">
-                      <td className="py-3 px-4 font-mono font-medium text-slate-600">{sale.date}</td>
-                      <td className="py-3 px-4">
-                        {sale.type === 'combo' ? (
-                          <div>
-                            <span className="font-semibold text-slate-800">{getItemSummary(sale)}</span>
-                          </div>
-                        ) : sale.items && sale.items.length > 0 ? (
-                          <div className="space-y-1 max-w-xs">
-                            {sale.items.map((it, idx) => {
-                              const p = products.find(prod => prod.id === it.productId);
-                              return (
-                                <div key={idx} className="flex items-center gap-1.5 text-xs text-slate-800">
-                                  <span className="font-semibold">{p?.name || 'Product'}</span>
-                                  <span className="text-pink-600 font-mono font-bold text-[11px]">×{it.qty}</span>
-                                  {sale.items!.length > 1 && (
-                                    <span className="text-slate-400 text-[10px]">({formatNaira(it.unitPrice)})</span>
-                                  )}
-                                </div>
-                              );
-                            })}
-                            {sale.packagingCost !== undefined && sale.packagingCost > 0 && (
-                              <div className="text-[10px] text-pink-600 font-medium flex items-center gap-1">
-                                <Package className="w-3 h-3" />
-                                <span>Packaging: {formatNaira(sale.packagingCost)}</span>
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          <div>
-                            <span className="font-semibold text-slate-800">{getItemSummary(sale)}</span>
-                          </div>
-                        )}
+                      <td className="py-3 px-3.5 font-mono font-medium text-slate-600">{sale.date}</td>
+                      <td className="py-3 px-3.5">
+                        <div className="space-y-1 max-w-xs">
+                          {sale.type === 'combo' ? (
+                            <div>
+                              <span className="font-semibold text-slate-800">{getItemSummary(sale)}</span>
+                            </div>
+                          ) : sale.items && sale.items.length > 0 ? (
+                            <div className="space-y-1">
+                              {sale.items.map((it, idx) => {
+                                const p = products.find(prod => prod.id === it.productId);
+                                return (
+                                  <div key={idx} className="flex items-center gap-1.5 text-xs text-slate-800">
+                                    <span className="font-semibold">{p?.name || it.productName || sale.itemNameSnapshot || 'Catalog Product'}</span>
+                                    <span className="text-pink-600 font-mono font-bold text-[11px]">×{it.qty}</span>
+                                    {sale.items!.length > 1 && (
+                                      <span className="text-slate-400 text-[10px]">({formatNaira(it.unitPrice)})</span>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <div>
+                              <span className="font-semibold text-slate-800">{getItemSummary(sale)}</span>
+                            </div>
+                          )}
+
+                          {/* Desktop Packaging & Gift tags */}
+                          {sale.packagingCost !== undefined && sale.packagingCost > 0 && (
+                            <div className="text-[10px] text-pink-700 font-medium flex items-center gap-1 bg-pink-50/70 px-1.5 py-0.5 rounded border border-pink-100 w-fit">
+                              <Package className="w-3 h-3 text-pink-500" />
+                              <span>Packaging: {formatNaira(sale.packagingCost)}</span>
+                            </div>
+                          )}
+                          {sale.gift && (
+                            <div className="text-[10px] text-purple-700 font-medium flex items-center gap-1 bg-purple-50/70 px-1.5 py-0.5 rounded border border-purple-100 w-fit">
+                              <Gift className="w-3 h-3 text-purple-500 shrink-0" />
+                              <span>
+                                Gift: {sale.gift.isProduct
+                                  ? `${products.find(p => p.id === sale.gift?.productId)?.name || sale.gift.productName || 'Gift Item'} ×${sale.gift.qty || 1}`
+                                  : (sale.gift.customDescription || sale.gift.description || 'Custom Gift')}
+                                {' '}({formatNaira(sale.gift.cost)})
+                              </span>
+                            </div>
+                          )}
+                        </div>
                       </td>
-                      <td className="py-3 px-4">
+                      <td className="py-3 px-3">
                         <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-semibold ${
                           sale.type === 'combo'
                             ? 'bg-pink-50 text-pink-700 border border-pink-200'
@@ -540,31 +645,69 @@ export const SalesView: React.FC<SalesViewProps> = ({
                             ? 'bg-purple-50 text-purple-700 border border-purple-200'
                             : 'bg-slate-100 text-slate-700'
                         }`}>
-                          {sale.type === 'combo' ? 'Bundle Combo' : isMultiItem ? 'Multi-Item' : 'Single SKU'}
+                          {sale.type === 'combo' ? 'Bundle' : isMultiItem ? 'Multi' : 'Single'}
                         </span>
                       </td>
-                      <td className="py-3 px-4">
+                      <td className="py-3 px-3.5">
                         <div className="font-medium text-slate-800">{sale.customer || 'Direct Customer'}</div>
-                        <button
-                          type="button"
-                          onClick={() => handleSetChannelFilter(sale.channel || 'Direct')}
-                          className={`inline-block mt-0.5 text-[10px] px-2 py-0.5 rounded font-medium transition-all hover:opacity-80 cursor-pointer ${getChannelBadgeClass(sale.channel)}`}
-                          title={`Filter sales by channel: ${sale.channel || 'Direct'}`}
-                        >
-                          {sale.channel || 'Direct'}
-                        </button>
+                        {(() => {
+                          const badge = resolveChannelBadge(sale.channel, salesChannels);
+                          return (
+                            <span className={`inline-flex items-center gap-1 mt-0.5 text-[10px] px-2 py-0.2 rounded font-medium border ${badge.bg} ${badge.text} ${badge.border}`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${badge.dot}`} />
+                              <span>{sale.channel || 'Direct'}</span>
+                            </span>
+                          );
+                        })()}
                       </td>
-                      <td className="py-3 px-4 text-right font-bold text-slate-800">{totalQty}</td>
-                      <td className="py-3 px-4 text-right text-slate-600">
+
+                      {/* Payment Status Dropdown Cell */}
+                      <td className="py-3 px-3">
+                        <div className="relative inline-block">
+                          <select
+                            aria-label={`Payment status for sale ${sale.id}`}
+                            value={sale.paymentStatus || 'Paid'}
+                            onChange={(e) => onUpdateSaleStatus && onUpdateSaleStatus(sale.id, e.target.value as PaymentStatus, undefined)}
+                            className={`appearance-none text-[11px] font-bold pl-2.5 pr-6 py-1 rounded-full border cursor-pointer focus:outline-hidden transition-colors ${payBadge.bg}`}
+                          >
+                            <option value="Paid">Paid</option>
+                            <option value="Pending">Pending</option>
+                            <option value="Partially Paid">Partial</option>
+                          </select>
+                          <ChevronDown className="w-3 h-3 opacity-60 absolute right-1.5 top-2 pointer-events-none" />
+                        </div>
+                      </td>
+
+                      {/* Delivery Status Dropdown Cell */}
+                      <td className="py-3 px-3">
+                        <div className="relative inline-block">
+                          <select
+                            aria-label={`Delivery status for sale ${sale.id}`}
+                            value={sale.deliveryStatus || 'Delivered'}
+                            onChange={(e) => onUpdateSaleStatus && onUpdateSaleStatus(sale.id, undefined, e.target.value as DeliveryStatus)}
+                            className={`appearance-none text-[11px] font-bold pl-2.5 pr-6 py-1 rounded-full border cursor-pointer focus:outline-hidden transition-colors ${delBadge.bg}`}
+                          >
+                            <option value="Delivered">Delivered</option>
+                            <option value="Shipped">Shipped</option>
+                            <option value="Processing">Processing</option>
+                            <option value="Pending">Pending</option>
+                            <option value="Cancelled">Cancelled</option>
+                          </select>
+                          <ChevronDown className="w-3 h-3 opacity-60 absolute right-1.5 top-2 pointer-events-none" />
+                        </div>
+                      </td>
+
+                      <td className="py-3 px-3 text-right font-bold text-slate-800">{totalQty}</td>
+                      <td className="py-3 px-3 text-right text-slate-600">
                         {isMultiItem ? (
                           <span title="Weighted average selling price">Avg. {formatNaira(sale.sellingPrice)}</span>
                         ) : (
                           formatNaira(sale.sellingPrice)
                         )}
                       </td>
-                      <td className="py-3 px-4 text-right font-bold text-slate-800">{formatNaira(totalRev)}</td>
-                      <td className="py-3 px-4 text-right font-bold text-emerald-600">{formatNaira(netProfit)}</td>
-                      <td className="py-3 px-4 text-center">
+                      <td className="py-3 px-3 text-right font-bold text-slate-800">{formatNaira(totalRev)}</td>
+                      <td className="py-3 px-3 text-right font-bold text-emerald-600">{formatNaira(netProfit)}</td>
+                      <td className="py-3 px-3 text-center">
                         <div className="flex items-center justify-center gap-1">
                           {onEditSale && (
                             <button

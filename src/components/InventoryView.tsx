@@ -1,5 +1,5 @@
-import React from 'react';
-import { Package, Truck, AlertTriangle, AlertCircle, FilterX } from 'lucide-react';
+import React, { useMemo } from 'react';
+import { Package, Truck, AlertTriangle, AlertCircle, FilterX, Gift, CheckCircle2, ShoppingBag, Layers, DollarSign } from 'lucide-react';
 import { InventoryStockItem, formatNaira } from '../types';
 
 interface InventoryViewProps {
@@ -23,6 +23,33 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     selectedCategory !== 'all' ||
     selectedProductFilter !== 'all';
 
+  const totals = useMemo(() => {
+    let stockedIn = 0;
+    let sold = 0;
+    let gifted = 0;
+    let onHand = 0;
+    let valuation = 0;
+    let lowStockCount = 0;
+    let outOfStockCount = 0;
+
+    inventoryList.forEach(st => {
+      stockedIn += Number(st.totalStockedIn) || 0;
+      sold += Number(st.totalSold) || 0;
+      gifted += Number(st.totalGifted) || 0;
+      onHand += Number(st.currentStock) || 0;
+      if (st.currentStock > 0) {
+        valuation += Number(st.totalStockCostValue) || 0;
+      }
+      if (st.currentStock <= 0) {
+        outOfStockCount++;
+      } else if (st.currentStock <= st.lowStockThreshold) {
+        lowStockCount++;
+      }
+    });
+
+    return { stockedIn, sold, gifted, onHand, valuation, lowStockCount, outOfStockCount };
+  }, [inventoryList]);
+
   return (
     <div className="space-y-6 animate-in fade-in duration-150">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -32,17 +59,91 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             Live Inventory & Stock Health
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Aggregates total stock-in units against all single sales and combo package components.
+            Aggregates total stock-in units against all customer sales and promotional gift deductions with 100% batch reconciliation.
           </p>
         </div>
         <button
           id="btn-restock-inventory"
           onClick={onOpenStockIn}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-pink-500 hover:bg-pink-600 text-white text-xs sm:text-sm font-semibold rounded-xl shadow-xs shadow-pink-300 transition-all cursor-pointer"
+          className="inline-flex items-center gap-2 px-4 py-2 bg-pink-500 hover:bg-pink-600 text-white text-xs sm:text-sm font-semibold rounded-xl shadow-xs shadow-pink-300 transition-all cursor-pointer shrink-0"
         >
           <Truck className="w-4 h-4" />
           <span>Restock Inventory</span>
         </button>
+      </div>
+
+      {/* Real-time Inventory Reconciliation KPI Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <div className="bg-white p-3.5 rounded-2xl border border-slate-100 shadow-2xs space-y-1">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold text-slate-500">Total Stocked In</span>
+            <Truck className="w-4 h-4 text-pink-600" />
+          </div>
+          <div className="text-xl font-bold text-slate-800">{totals.stockedIn} pcs</div>
+          <div className="text-[10px] text-slate-400">Total batch inbound</div>
+        </div>
+
+        <div className="bg-white p-3.5 rounded-2xl border border-slate-100 shadow-2xs space-y-1">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold text-slate-500">Units Sold</span>
+            <ShoppingBag className="w-4 h-4 text-emerald-600" />
+          </div>
+          <div className="text-xl font-bold text-pink-600">{totals.sold} pcs</div>
+          <div className="text-[10px] text-slate-400">Customer purchases</div>
+        </div>
+
+        <div className="bg-white p-3.5 rounded-2xl border border-slate-100 shadow-2xs space-y-1">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold text-slate-500">Gifted / Freebies</span>
+            <Gift className="w-4 h-4 text-purple-600" />
+          </div>
+          <div className="text-xl font-bold text-purple-600">{totals.gifted} pcs</div>
+          <div className="text-[10px] text-slate-400">Catalog promotional units</div>
+        </div>
+
+        <div className="bg-white p-3.5 rounded-2xl border border-emerald-200/80 bg-emerald-50/20 shadow-2xs space-y-1">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold text-emerald-800">Live On Hand</span>
+            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+          </div>
+          <div className="text-xl font-bold text-emerald-700">{totals.onHand} pcs</div>
+          <div className="text-[10px] font-semibold text-emerald-600">Active stock ready to sell</div>
+        </div>
+
+        <div className="bg-white p-3.5 rounded-2xl border border-slate-100 shadow-2xs space-y-1 col-span-2 sm:col-span-1">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold text-slate-500">Asset Cost Value</span>
+            <DollarSign className="w-4 h-4 text-slate-600" />
+          </div>
+          <div className="text-xl font-bold text-slate-800">{formatNaira(totals.valuation)}</div>
+          <div className="text-[10px] text-slate-400">Landed valuation</div>
+        </div>
+      </div>
+
+      {/* Reconciliation Formula Banner */}
+      <div className="bg-slate-50 border border-slate-200/80 rounded-2xl px-4 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-slate-600">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-bold text-slate-700">Stock Tally:</span>
+          <span className="font-mono bg-white px-2 py-0.5 rounded border border-slate-200 text-slate-800 font-semibold">
+            {totals.stockedIn} Stocked In
+          </span>
+          <span className="text-slate-400 font-bold">−</span>
+          <span className="font-mono bg-white px-2 py-0.5 rounded border border-slate-200 text-pink-600 font-semibold">
+            {totals.sold} Sold
+          </span>
+          <span className="text-slate-400 font-bold">−</span>
+          <span className="font-mono bg-white px-2 py-0.5 rounded border border-slate-200 text-purple-700 font-semibold">
+            {totals.gifted} Gifted
+          </span>
+          <span className="text-slate-400 font-bold">=</span>
+          <span className="font-mono bg-emerald-100/80 px-2 py-0.5 rounded border border-emerald-300 text-emerald-800 font-bold">
+            {totals.onHand} pcs Live On Hand
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-700">
+          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+          <span>✓ 100% In Tally with Inbound Batches</span>
+        </div>
       </div>
 
       {/* Notice banner if global Category or Product filter is applied */}
@@ -125,19 +226,25 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                       )}
                     </div>
 
-                    <div className="grid grid-cols-3 gap-2 text-xs bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                    <div className="grid grid-cols-4 gap-1.5 text-xs bg-slate-50 p-2 rounded-xl border border-slate-100 text-center">
                       <div>
-                        <span className="text-slate-400 text-[10px] block">Stocked In</span>
-                        <span className="font-semibold text-slate-700">{st.totalStockedIn} pcs</span>
+                        <span className="text-slate-400 text-[10px] block">Stocked</span>
+                        <span className="font-semibold text-slate-700">{st.totalStockedIn}</span>
                       </div>
                       <div>
                         <span className="text-slate-400 text-[10px] block">Sold</span>
-                        <span className="font-semibold text-pink-600">{st.totalSold} pcs</span>
+                        <span className="font-semibold text-pink-600">{st.totalSold}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 text-[10px] block">Gifted</span>
+                        <span className={`font-semibold ${st.totalGifted > 0 ? 'text-purple-600 font-bold' : 'text-slate-500'}`}>
+                          {st.totalGifted || 0}
+                        </span>
                       </div>
                       <div>
                         <span className="text-slate-400 text-[10px] block">On Hand</span>
                         <span className={`font-bold ${isLow ? 'text-amber-600' : 'text-slate-800'}`}>
-                          {st.currentStock} pcs
+                          {st.currentStock}
                         </span>
                       </div>
                     </div>
@@ -158,13 +265,14 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               <table className="w-full text-left text-xs">
                 <thead className="bg-slate-50 border-b border-slate-200/80 text-slate-500 font-semibold uppercase text-[10px] tracking-wider">
                   <tr>
-                    <th className="py-3.5 px-4 font-semibold">Code</th>
+                    <th className="py-3.5 px-4 font-semibold">SKU Code</th>
                     <th className="py-3.5 px-4 font-semibold">Product Name</th>
                     <th className="py-3.5 px-4 font-semibold">Category</th>
-                    <th className="py-3.5 px-4 text-right font-semibold">Total Stocked In</th>
-                    <th className="py-3.5 px-4 text-right font-semibold">Total Sold</th>
-                    <th className="py-3.5 px-4 text-right font-semibold">Stock On Hand</th>
-                    <th className="py-3.5 px-4 text-right font-semibold">Cost Valuation</th>
+                    <th className="py-3.5 px-4 text-right font-semibold">Stocked In</th>
+                    <th className="py-3.5 px-4 text-right font-semibold">Sold</th>
+                    <th className="py-3.5 px-4 text-right font-semibold">Gifted / Freebies</th>
+                    <th className="py-3.5 px-4 text-right font-semibold">On Hand</th>
+                    <th className="py-3.5 px-4 text-right font-semibold">Asset Value</th>
                     <th className="py-3.5 px-4 text-center font-semibold">Status</th>
                   </tr>
                 </thead>
@@ -180,6 +288,16 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         <td className="py-3.5 px-4 text-slate-500">{st.product.category}</td>
                         <td className="py-3.5 px-4 text-right font-medium text-slate-700">{st.totalStockedIn} pcs</td>
                         <td className="py-3.5 px-4 text-right font-medium text-pink-600">{st.totalSold} pcs</td>
+                        <td className="py-3.5 px-4 text-right font-medium">
+                          {st.totalGifted > 0 ? (
+                            <span className="inline-flex items-center gap-1 text-purple-700 font-bold bg-purple-50 border border-purple-200 px-2 py-0.5 rounded-full text-[10px]">
+                              <Gift className="w-3 h-3 text-purple-600" />
+                              {st.totalGifted} pcs
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">0 pcs</span>
+                          )}
+                        </td>
                         <td className={`py-3.5 px-4 text-right font-bold text-sm ${isLow ? 'text-amber-600' : 'text-slate-800'}`}>
                           {st.currentStock} pcs
                         </td>

@@ -1,7 +1,6 @@
-import React, { useState } from 'react';
-import { X, ShoppingBag, Truck, Tag, Sparkles, Trash2, Plus, Package, Box, Sliders } from 'lucide-react';
-import { ProductItem, ComboItem, formatNaira, SaleRecord, DEFAULT_SALES_CHANNELS } from '../types';
-import { SalesChannelManager } from './SalesChannelManager';
+import React from 'react';
+import { X, ShoppingBag, Truck, Tag, Sparkles, Trash2, Plus, Package, Box, Gift, RefreshCw, Settings2 } from 'lucide-react';
+import { ProductItem, ComboItem, InventoryStockItem, SalesChannel, DEFAULT_SALES_CHANNELS, formatNaira, generateUniqueSKU } from '../types';
 
 interface ModalsProps {
   showAddSaleModal: boolean;
@@ -11,6 +10,8 @@ interface ModalsProps {
   editingSaleId?: string | null;
   onCloseSaleModal?: () => void;
   handleSaveSale: (e: React.FormEvent) => void;
+  salesChannels?: SalesChannel[];
+  onOpenManageChannels?: () => void;
 
   showAddBatchModal: boolean;
   setShowAddBatchModal: (val: boolean) => void;
@@ -36,15 +37,9 @@ interface ModalsProps {
 
   products: ProductItem[];
   combos: ComboItem[];
+  inventoryStock?: Record<string, InventoryStockItem>;
   getComboCostBreakdown: (c: ComboItem) => any;
   getProductCostBreakdown?: (p: ProductItem) => any;
-
-  salesChannels?: string[];
-  onAddSalesChannel?: (name: string) => boolean;
-  onUpdateSalesChannel?: (oldName: string, newName: string) => boolean;
-  onDeleteSalesChannel?: (name: string) => void;
-  onResetSalesChannels?: () => void;
-  sales?: SaleRecord[];
 }
 
 export const Modals: React.FC<ModalsProps> = ({
@@ -55,6 +50,8 @@ export const Modals: React.FC<ModalsProps> = ({
   editingSaleId,
   onCloseSaleModal,
   handleSaveSale,
+  salesChannels = DEFAULT_SALES_CHANNELS,
+  onOpenManageChannels,
 
   showAddBatchModal,
   setShowAddBatchModal,
@@ -80,16 +77,9 @@ export const Modals: React.FC<ModalsProps> = ({
 
   products,
   combos,
-  getComboCostBreakdown,
-
-  salesChannels = DEFAULT_SALES_CHANNELS,
-  onAddSalesChannel,
-  onUpdateSalesChannel,
-  onDeleteSalesChannel,
-  onResetSalesChannels,
-  sales = []
+  inventoryStock,
+  getComboCostBreakdown
 }) => {
-  const [showChannelManager, setShowChannelManager] = useState(false);
   return (
     <>
       {/* MODAL 1: RECORD OR EDIT SALE */}
@@ -165,6 +155,7 @@ export const Modals: React.FC<ModalsProps> = ({
         let saleTotalUnits = 0;
         let saleTotalCost = 0;
         const currentSalePackaging = Number(newSale.packagingCost) >= 0 ? Number(newSale.packagingCost) : 0;
+        const currentGiftCost = newSale.hasGift && newSale.gift ? Math.max(0, Number(newSale.gift.cost) || 0) : 0;
 
         if (newSale.type === 'combo') {
           const cmbId = newSale.comboId || newSale.itemId || combos[0]?.id;
@@ -175,7 +166,9 @@ export const Modals: React.FC<ModalsProps> = ({
           saleTotalUnits = qty;
           if (cmb) {
             const breakdown = getComboCostBreakdown(cmb);
-            saleTotalCost = breakdown.totalCost * qty;
+            saleTotalCost = (breakdown.totalCost * qty) + currentSalePackaging + currentGiftCost;
+          } else {
+            saleTotalCost = currentSalePackaging + currentGiftCost;
           }
         } else {
           let itemsBaseCost = 0;
@@ -186,11 +179,11 @@ export const Modals: React.FC<ModalsProps> = ({
             saleTotalUnits += q;
             const prod = products.find(pr => pr.id === it.productId);
             if (prod) {
-              const unitBase = (Number(prod.unitLandedCost) || 0) + (Number(prod.giftCost) || 0) + (Number(prod.miscCost) || 0);
+              const unitBase = Number(prod.unitLandedCost) || 0;
               itemsBaseCost += unitBase * q;
             }
           });
-          saleTotalCost = itemsBaseCost + currentSalePackaging;
+          saleTotalCost = itemsBaseCost + currentSalePackaging + currentGiftCost;
         }
 
         const saleNetProfit = saleTotalRevenue - saleTotalCost;
@@ -259,7 +252,6 @@ export const Modals: React.FC<ModalsProps> = ({
                   <div>
                     <label className="font-semibold text-slate-600 block mb-1">Customer Name</label>
                     <input
-                      id="input-sale-customer-name"
                       type="text"
                       placeholder="e.g. Amina Bello"
                       value={newSale.customer}
@@ -270,23 +262,23 @@ export const Modals: React.FC<ModalsProps> = ({
                   <div>
                     <div className="flex items-center justify-between mb-1">
                       <label className="font-semibold text-slate-600 block">Sales Channel</label>
-                      <button
-                        id="btn-toggle-channel-manager-in-sale"
-                        type="button"
-                        onClick={() => setShowChannelManager(!showChannelManager)}
-                        className="text-[11px] font-bold text-pink-600 hover:text-pink-700 flex items-center gap-1 hover:underline cursor-pointer"
-                        title={showChannelManager ? "Done managing channels" : "Add, edit, or delete sales channels"}
-                      >
-                        <Sliders className="w-3 h-3 text-pink-500" />
-                        <span>{showChannelManager ? 'Done' : '+ Manage'}</span>
-                      </button>
+                      {onOpenManageChannels && (
+                        <button
+                          type="button"
+                          onClick={onOpenManageChannels}
+                          className="text-[11px] text-pink-600 hover:text-pink-700 font-semibold flex items-center gap-1 hover:underline cursor-pointer"
+                          title="Add, edit, or delete sales channels"
+                        >
+                          <Settings2 className="w-3 h-3" />
+                          <span>Manage</span>
+                        </button>
+                      )}
                     </div>
                     <select
-                      id="select-sales-channel-dropdown"
                       value={newSale.channel}
                       onChange={(e) => {
-                        if (e.target.value === '__add_or_manage__') {
-                          setShowChannelManager(true);
+                        if (e.target.value === '__manage_channels__') {
+                          onOpenManageChannels?.();
                         } else {
                           setNewSale({ ...newSale, channel: e.target.value });
                         }
@@ -294,49 +286,77 @@ export const Modals: React.FC<ModalsProps> = ({
                       className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:bg-white focus:border-pink-500 outline-none cursor-pointer"
                     >
                       {salesChannels.map((ch) => (
-                        <option key={ch} value={ch}>
-                          {ch}
+                        <option key={ch.id} value={ch.name}>
+                          {ch.name}
                         </option>
                       ))}
-                      <option value="__add_or_manage__">
-                        ⚙️ + Add, Edit, or Delete Channels...
+                      {/* If existing sale has a custom or deleted channel, preserve selection */}
+                      {newSale.channel &&
+                        !salesChannels.some((c) => c.name === newSale.channel) &&
+                        newSale.channel !== '__manage_channels__' && (
+                          <option value={newSale.channel}>{newSale.channel} (Custom)</option>
+                        )}
+                      <option value="__manage_channels__" className="font-bold text-pink-600 bg-pink-50">
+                        + Add / Manage Sales Channels...
                       </option>
                     </select>
                   </div>
+                </div>
 
-                  {/* Expandable Inline Sales Channels Manager */}
-                  {showChannelManager && (
-                    <div className="col-span-2">
-                      <SalesChannelManager
-                        channels={salesChannels}
-                        onAddChannel={(name) => {
-                          if (onAddSalesChannel) {
-                            return onAddSalesChannel(name);
-                          }
-                          return false;
-                        }}
-                        onUpdateChannel={(oldN, newN) => {
-                          if (onUpdateSalesChannel) {
-                            return onUpdateSalesChannel(oldN, newN);
-                          }
-                          return false;
-                        }}
-                        onDeleteChannel={(name) => {
-                          if (onDeleteSalesChannel) {
-                            onDeleteSalesChannel(name);
-                          }
-                        }}
-                        onResetDefaults={onResetSalesChannels}
-                        selectedChannel={newSale.channel}
-                        onSelectChannel={(newCh) => {
-                          setNewSale({ ...newSale, channel: newCh });
-                        }}
-                        sales={sales}
-                        isInline={true}
-                        onClose={() => setShowChannelManager(false)}
-                      />
-                    </div>
-                  )}
+                {/* Payment Status & Delivery Status */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="font-semibold text-slate-600 block mb-1 flex items-center justify-between">
+                      <span>Payment Status</span>
+                      <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded-md ${
+                        (newSale.paymentStatus || 'Paid') === 'Paid'
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : (newSale.paymentStatus || 'Paid') === 'Partially Paid'
+                          ? 'bg-blue-100 text-blue-800'
+                          : 'bg-amber-100 text-amber-800'
+                      }`}>
+                        {newSale.paymentStatus || 'Paid'}
+                      </span>
+                    </label>
+                    <select
+                      value={newSale.paymentStatus || 'Paid'}
+                      onChange={(e) => setNewSale({ ...newSale, paymentStatus: e.target.value })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:bg-white focus:border-pink-500 outline-none cursor-pointer text-xs"
+                    >
+                      <option value="Paid">Paid (Full Payment)</option>
+                      <option value="Pending">Pending (Payment Due)</option>
+                      <option value="Partially Paid">Partially Paid (Deposit)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="font-semibold text-slate-600 block mb-1 flex items-center justify-between">
+                      <span>Delivery Status</span>
+                      <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded-md ${
+                        (newSale.deliveryStatus || 'Delivered') === 'Delivered'
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : (newSale.deliveryStatus || 'Delivered') === 'Shipped'
+                          ? 'bg-sky-100 text-sky-800'
+                          : (newSale.deliveryStatus || 'Delivered') === 'Processing'
+                          ? 'bg-purple-100 text-purple-800'
+                          : (newSale.deliveryStatus || 'Delivered') === 'Cancelled'
+                          ? 'bg-rose-100 text-rose-800'
+                          : 'bg-amber-100 text-amber-800'
+                      }`}>
+                        {newSale.deliveryStatus || 'Delivered'}
+                      </span>
+                    </label>
+                    <select
+                      value={newSale.deliveryStatus || 'Delivered'}
+                      onChange={(e) => setNewSale({ ...newSale, deliveryStatus: e.target.value })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:bg-white focus:border-pink-500 outline-none cursor-pointer text-xs"
+                    >
+                      <option value="Delivered">Delivered</option>
+                      <option value="Shipped">Shipped (In Transit)</option>
+                      <option value="Processing">Processing</option>
+                      <option value="Pending">Pending Dispatch</option>
+                      <option value="Cancelled">Cancelled</option>
+                    </select>
+                  </div>
                 </div>
 
                 {/* SECTION A: SINGLE OR MULTI-PRODUCT ORDER */}
@@ -388,11 +408,13 @@ export const Modals: React.FC<ModalsProps> = ({
                                 onChange={(e) => handleUpdateProductLine(idx, 'productId', e.target.value)}
                                 className="w-full bg-white border border-slate-200 rounded-lg p-1.5 font-medium text-slate-800 focus:border-pink-500 outline-none cursor-pointer text-xs"
                               >
-                                {products.map(p => (
-                                  <option key={p.id} value={p.id}>
-                                    {p.name} [{p.category}] — {formatNaira(p.sellingPrice)}
-                                  </option>
-                                ))}
+                                {products
+                                  .filter(p => !p.isArchived || p.id === item.productId)
+                                  .map(p => (
+                                    <option key={p.id} value={p.id}>
+                                      {p.name} [{p.category}]{p.isArchived ? ' (Archived)' : ''} — {formatNaira(p.sellingPrice)}
+                                    </option>
+                                  ))}
                               </select>
                             </div>
 
@@ -439,70 +461,6 @@ export const Modals: React.FC<ModalsProps> = ({
                       <Plus className="w-3.5 h-3.5" />
                       <span>Add Another Product to this Sale</span>
                     </button>
-
-                    {/* DEDICATED ORDER PACKAGING COST SECTION */}
-                    <div className="bg-amber-50/70 border border-amber-200/80 rounded-xl p-3 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <label className="font-bold text-slate-700 flex items-center gap-1.5 text-xs">
-                          <Box className="w-4 h-4 text-amber-600" />
-                          <span>Order Packaging Cost (₦)</span>
-                        </label>
-                        <span className="text-[10px] font-semibold text-amber-700 bg-amber-100/80 px-2 py-0.5 rounded-full">
-                          Single packaging for this entire sale
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-slate-500 leading-tight">
-                        One packaging charge for this whole customer purchase (e.g. 1 shipping box or pouch). If the customer bought large quantities requiring multiple packages, adjust the cost here.
-                      </p>
-                      <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-                        <div className="relative flex-1">
-                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xs">₦</span>
-                          <input
-                            type="number"
-                            min="0"
-                            required
-                            value={newSale.packagingCost !== undefined ? newSale.packagingCost : ''}
-                            onChange={(e) => setNewSale({ ...newSale, packagingCost: Math.max(0, Number(e.target.value) || 0) })}
-                            className="w-full pl-6 pr-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 focus:border-pink-500 outline-none"
-                            placeholder="e.g. 200"
-                          />
-                        </div>
-                        <div className="flex items-center gap-1 flex-wrap">
-                          <button
-                            type="button"
-                            onClick={() => setNewSale({ ...newSale, packagingCost: 0 })}
-                            className="px-2 py-1 rounded-md text-[10px] font-semibold bg-white hover:bg-amber-100 border border-amber-200 text-slate-600 hover:text-amber-800 transition-colors cursor-pointer"
-                            title="No packaging / In-person pickup"
-                          >
-                            ₦0 (None)
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setNewSale({ ...newSale, packagingCost: 200 })}
-                            className="px-2 py-1 rounded-md text-[10px] font-semibold bg-white hover:bg-amber-100 border border-amber-200 text-slate-600 hover:text-amber-800 transition-colors cursor-pointer"
-                            title="1 Standard pouch / box"
-                          >
-                            ₦200 (Standard)
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setNewSale({ ...newSale, packagingCost: 350 })}
-                            className="px-2 py-1 rounded-md text-[10px] font-semibold bg-white hover:bg-amber-100 border border-amber-200 text-slate-600 hover:text-amber-800 transition-colors cursor-pointer"
-                            title="1 Medium mailer box"
-                          >
-                            ₦350 (Medium)
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setNewSale({ ...newSale, packagingCost: 500 })}
-                            className="px-2 py-1 rounded-md text-[10px] font-semibold bg-white hover:bg-amber-100 border border-amber-200 text-slate-600 hover:text-amber-800 transition-colors cursor-pointer"
-                            title="Large package or 2 shipping boxes"
-                          >
-                            ₦500 (2 Boxes)
-                          </button>
-                        </div>
-                      </div>
-                    </div>
                   </div>
                 ) : (
                   /* SECTION B: PREDEFINED COMBO BUNDLE ORDER */
@@ -566,6 +524,265 @@ export const Modals: React.FC<ModalsProps> = ({
                   </div>
                 )}
 
+                {/* 1. ORDER PACKAGING (Unified single box for any sale, editable cost) */}
+                <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="font-bold text-slate-700 flex items-center gap-1.5 text-xs">
+                      <Box className="w-4 h-4 text-pink-600" />
+                      <span>Order Packaging Cost (₦)</span>
+                    </label>
+                    <span className="text-[10px] text-slate-400">Shipping box, pouch, or wrapping</span>
+                  </div>
+                  <div className="relative">
+                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xs">₦</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={newSale.packagingCost !== undefined ? newSale.packagingCost : ''}
+                      onChange={(e) => setNewSale({ ...newSale, packagingCost: Math.max(0, Number(e.target.value) || 0) })}
+                      className="w-full pl-6 pr-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 focus:border-pink-500 outline-none"
+                      placeholder="0"
+                    />
+                  </div>
+                </div>
+
+                {/* 2. OPTIONAL GIFTS / FREEBIES */}
+                <div className="bg-pink-50/40 border border-pink-200/80 rounded-xl p-3 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <label className="font-bold text-slate-700 flex items-center gap-1.5 text-xs">
+                      <Gift className="w-4 h-4 text-pink-600" />
+                      <span>Gift / Promotional Freebie</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(newSale.hasGift)}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          if (!checked) {
+                            setNewSale({
+                              ...newSale,
+                              hasGift: false,
+                              gift: undefined
+                            });
+                          } else {
+                            const defaultProd = products[0];
+                            const defaultCost = defaultProd ? Number(defaultProd.unitLandedCost) || 0 : 0;
+                            setNewSale({
+                              ...newSale,
+                              hasGift: true,
+                              gift: {
+                                hasGift: true,
+                                isProduct: true,
+                                productId: defaultProd?.id || '',
+                                productName: defaultProd?.name || '',
+                                qty: 1,
+                                cost: defaultCost,
+                                description: ''
+                              }
+                            });
+                          }
+                        }}
+                        className="rounded text-pink-600 focus:ring-pink-500 h-3.5 w-3.5 cursor-pointer"
+                      />
+                      <span className="text-[11px] font-semibold text-pink-700">Include Gift with this Sale</span>
+                    </label>
+                  </div>
+
+                  {newSale.hasGift && newSale.gift && (
+                    <div className="space-y-2.5 pt-1 border-t border-pink-200/60 animate-in fade-in duration-150">
+                      {/* Gift Type Choice: Product from Master vs Custom Gift */}
+                      <div className="flex items-center gap-4 text-xs font-medium text-slate-700">
+                        <label className="flex items-center gap-1.5 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="giftType"
+                            checked={Boolean(newSale.gift.isProduct)}
+                            onChange={() => {
+                              const currentProd = products.find(p => p.id === newSale.gift?.productId) || products[0];
+                              const qty = Math.max(1, Number(newSale.gift?.qty) || 1);
+                              const cost = (currentProd?.unitLandedCost || 0) * qty;
+                              setNewSale({
+                                ...newSale,
+                                gift: {
+                                  ...newSale.gift,
+                                  isProduct: true,
+                                  productId: currentProd?.id || '',
+                                  productName: currentProd?.name || '',
+                                  qty,
+                                  cost
+                                }
+                              });
+                            }}
+                            className="text-pink-600 focus:ring-pink-500 cursor-pointer"
+                          />
+                          <span>Product from Product Master (reduces inventory)</span>
+                        </label>
+                        <label className="flex items-center gap-1.5 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="giftType"
+                            checked={!newSale.gift.isProduct}
+                            onChange={() => {
+                              setNewSale({
+                                ...newSale,
+                                gift: {
+                                  ...newSale.gift,
+                                  isProduct: false,
+                                  productId: undefined,
+                                  description: newSale.gift?.description || 'Satin Hair Scrunchie',
+                                  cost: newSale.gift?.cost || 150
+                                }
+                              });
+                            }}
+                            className="text-pink-600 focus:ring-pink-500 cursor-pointer"
+                          />
+                          <span>Custom / External Item (cost only)</span>
+                        </label>
+                      </div>
+
+                      {/* If Product from Master */}
+                      {newSale.gift.isProduct ? (
+                        <div className="space-y-2 bg-white/80 p-2.5 rounded-lg border border-pink-100">
+                          <div>
+                            <label className="text-[10px] text-slate-500 font-semibold block mb-0.5">
+                              Select Catalog Product for Gift
+                            </label>
+                            <select
+                              value={newSale.gift.productId || products[0]?.id || ''}
+                              onChange={(e) => {
+                                const selId = e.target.value;
+                                const p = products.find(prod => prod.id === selId);
+                                const qty = Math.max(1, Number(newSale.gift?.qty) || 1);
+                                const autoCost = (Number(p?.unitLandedCost) || 0) * qty;
+                                setNewSale({
+                                  ...newSale,
+                                  gift: {
+                                    ...newSale.gift,
+                                    productId: selId,
+                                    productName: p?.name || '',
+                                    cost: autoCost
+                                  }
+                                });
+                              }}
+                              className="w-full bg-white border border-slate-200 rounded-lg p-1.5 font-medium text-slate-800 text-xs focus:border-pink-500 outline-none cursor-pointer"
+                            >
+                              {products
+                                .filter(p => !p.isArchived || p.id === newSale.gift?.productId)
+                                .map(p => {
+                                  const stockInfo = inventoryStock ? inventoryStock[p.id]?.currentStock : undefined;
+                                  return (
+                                    <option key={p.id} value={p.id}>
+                                      {p.name} [{p.code}]{p.isArchived ? ' (Archived)' : ''} {stockInfo !== undefined ? `— ${stockInfo} in stock` : ''} (Landed: {formatNaira(p.unitLandedCost)})
+                                    </option>
+                                  );
+                                })}
+                            </select>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="text-[10px] text-slate-500 font-semibold block mb-0.5">Gift Quantity</label>
+                              <input
+                                type="number"
+                                min="1"
+                                required
+                                value={newSale.gift.qty || 1}
+                                onChange={(e) => {
+                                  const q = Math.max(1, Number(e.target.value) || 1);
+                                  const p = products.find(prod => prod.id === newSale.gift?.productId);
+                                  const autoCost = (Number(p?.unitLandedCost) || 0) * q;
+                                  setNewSale({
+                                    ...newSale,
+                                    gift: {
+                                      ...newSale.gift,
+                                      qty: q,
+                                      cost: autoCost
+                                    }
+                                  });
+                                }}
+                                className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 font-bold text-slate-800 text-xs focus:border-pink-500 outline-none"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] text-slate-500 font-semibold block mb-0.5">Gift Cost (₦)</label>
+                              <input
+                                type="number"
+                                min="0"
+                                required
+                                value={newSale.gift.cost !== undefined ? newSale.gift.cost : ''}
+                                onChange={(e) => {
+                                  setNewSale({
+                                    ...newSale,
+                                    gift: {
+                                      ...newSale.gift,
+                                      cost: Math.max(0, Number(e.target.value) || 0)
+                                    }
+                                  });
+                                }}
+                                className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 font-bold text-pink-600 text-xs focus:border-pink-500 outline-none"
+                              />
+                            </div>
+                          </div>
+                          <p className="text-[10px] text-emerald-700 bg-emerald-50 px-2 py-1 rounded border border-emerald-100 flex items-center gap-1">
+                            <Package className="w-3 h-3 shrink-0" />
+                            <span>
+                              Reflected in inventory: pulls <strong>{newSale.gift.qty || 1} unit(s)</strong> of this product from stock and adds <strong>{formatNaira(newSale.gift.cost || 0)}</strong> to order expenses.
+                            </span>
+                          </p>
+                        </div>
+                      ) : (
+                        /* Custom Gift Option */
+                        <div className="space-y-2 bg-white/80 p-2.5 rounded-lg border border-pink-100">
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="text-[10px] text-slate-500 font-semibold block mb-0.5">Gift Description</label>
+                              <input
+                                type="text"
+                                placeholder="e.g. Satin Scrunchie / Sample Vial"
+                                value={newSale.gift.description || ''}
+                                onChange={(e) => {
+                                  setNewSale({
+                                    ...newSale,
+                                    gift: {
+                                      ...newSale.gift,
+                                      description: e.target.value
+                                    }
+                                  });
+                                }}
+                                className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 font-medium text-slate-800 text-xs focus:border-pink-500 outline-none"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] text-slate-500 font-semibold block mb-0.5">Gift Cost (₦)</label>
+                              <input
+                                type="number"
+                                min="0"
+                                required
+                                value={newSale.gift.cost !== undefined ? newSale.gift.cost : ''}
+                                onChange={(e) => {
+                                  setNewSale({
+                                    ...newSale,
+                                    gift: {
+                                      ...newSale.gift,
+                                      cost: Math.max(0, Number(e.target.value) || 0)
+                                    }
+                                  });
+                                }}
+                                className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 font-bold text-pink-600 text-xs focus:border-pink-500 outline-none"
+                                placeholder="150"
+                              />
+                            </div>
+                          </div>
+                          <p className="text-[10px] text-slate-500">
+                            Promotional non-inventory gift item (adds to order cost, does not reduce product inventory).
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 {/* TRANSACTION FINANCIAL BREAKDOWN & PROFIT ESTIMATE */}
                 <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3 space-y-1.5">
                   <div className="flex items-center justify-between text-xs">
@@ -574,10 +791,16 @@ export const Modals: React.FC<ModalsProps> = ({
                       {saleTotalUnits} unit(s) {newSale.type === 'single' ? `(${saleItems.length} product${saleItems.length > 1 ? 's' : ''})` : ''}
                     </span>
                   </div>
-                  {newSale.type === 'single' && (
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-500">Order Packaging:</span>
+                    <span className="font-semibold text-amber-700">{formatNaira(currentSalePackaging)}</span>
+                  </div>
+                  {newSale.hasGift && newSale.gift && (
                     <div className="flex items-center justify-between text-xs">
-                      <span className="text-slate-500">Order Packaging:</span>
-                      <span className="font-semibold text-amber-700">{formatNaira(currentSalePackaging)}</span>
+                      <span className="text-slate-500">
+                        Gift ({newSale.gift.isProduct ? (newSale.gift.productName || 'Catalog Product') : (newSale.gift.description || 'Custom')}{newSale.gift.isProduct && newSale.gift.qty ? ` ×${newSale.gift.qty}` : ''}):
+                      </span>
+                      <span className="font-semibold text-pink-600">{formatNaira(currentGiftCost)}</span>
                     </div>
                   )}
                   <div className="flex items-center justify-between text-xs border-t border-slate-200/60 pt-1.5">
@@ -710,9 +933,11 @@ export const Modals: React.FC<ModalsProps> = ({
                       }}
                       className="w-1/2 bg-white border border-slate-200 rounded-lg p-1.5 cursor-pointer outline-none text-slate-800"
                     >
-                      {products.map(p => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
-                      ))}
+                      {products
+                        .filter(p => !p.isArchived || p.id === it.productId)
+                        .map(p => (
+                          <option key={p.id} value={p.id}>{p.name}{p.isArchived ? ' (Archived)' : ''}</option>
+                        ))}
                     </select>
 
                     <input
@@ -830,27 +1055,25 @@ export const Modals: React.FC<ModalsProps> = ({
                   required
                   placeholder="e.g. Cherry Velvet Lip Tint"
                   value={newProd.name}
-                  onChange={(e) => setNewProd({ ...newProd, name: e.target.value })}
+                  onChange={(e) => {
+                    const newName = e.target.value;
+                    const autoSKU = generateUniqueSKU(newName, newProd.category, products, editingProductId);
+                    setNewProd({ ...newProd, name: newName, code: autoSKU });
+                  }}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-bold focus:bg-white focus:border-pink-500 outline-none"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="font-semibold text-slate-600 block mb-1">Product Code</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. CVT-09"
-                    value={newProd.code}
-                    onChange={(e) => setNewProd({ ...newProd, code: e.target.value })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-mono uppercase focus:bg-white focus:border-pink-500 outline-none"
-                  />
-                </div>
-                <div>
                   <label className="font-semibold text-slate-600 block mb-1">Category</label>
                   <select
                     value={newProd.category}
-                    onChange={(e) => setNewProd({ ...newProd, category: e.target.value })}
+                    onChange={(e) => {
+                      const newCat = e.target.value;
+                      const autoSKU = generateUniqueSKU(newProd.name, newCat, products, editingProductId);
+                      setNewProd({ ...newProd, category: newCat, code: autoSKU });
+                    }}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:bg-white focus:border-pink-500 outline-none cursor-pointer"
                   >
                     <option value="Lip Gloss">Lip Gloss</option>
@@ -858,6 +1081,32 @@ export const Modals: React.FC<ModalsProps> = ({
                     <option value="Lip Balm">Lip Balm</option>
                     <option value="Lip Care">Lip Care</option>
                   </select>
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-semibold text-slate-600">Auto SKU Code</label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const autoSKU = generateUniqueSKU(newProd.name, newProd.category, products, editingProductId);
+                        setNewProd({ ...newProd, code: autoSKU });
+                      }}
+                      className="text-[10px] text-pink-600 hover:text-pink-700 font-semibold inline-flex items-center gap-0.5 cursor-pointer"
+                      title="Regenerate unique SKU from name and category"
+                    >
+                      <RefreshCw className="w-2.5 h-2.5" />
+                      <span>Regenerate</span>
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. LG-CV-01"
+                    value={newProd.code}
+                    onChange={(e) => setNewProd({ ...newProd, code: e.target.value.toUpperCase() })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-mono uppercase font-bold text-pink-600 focus:bg-white focus:border-pink-500 outline-none"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">Unique tracking code auto-derived from name & category</p>
                 </div>
               </div>
 
@@ -872,6 +1121,7 @@ export const Modals: React.FC<ModalsProps> = ({
                     onChange={(e) => setNewProd({ ...newProd, unitLandedCost: Number(e.target.value) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-medium focus:bg-white focus:border-pink-500 outline-none"
                   />
+                  <p className="text-[10px] text-slate-400 mt-0.5">Purchasing/factory base cost</p>
                 </div>
                 <div>
                   <label className="font-semibold text-slate-600 block mb-1">Selling Price (₦)</label>
@@ -883,36 +1133,25 @@ export const Modals: React.FC<ModalsProps> = ({
                     onChange={(e) => setNewProd({ ...newProd, sellingPrice: Number(e.target.value) })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-bold text-pink-600 focus:bg-white focus:border-pink-500 outline-none"
                   />
+                  <p className="text-[10px] text-slate-400 mt-0.5">Customer retail price</p>
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-2">
+              {/* Live Unit Economics Preview */}
+              <div className="bg-slate-50 rounded-xl p-3 border border-slate-200/80 flex items-center justify-between text-xs">
                 <div>
-                  <label className="font-semibold text-slate-500 block mb-1 text-[11px]">Packaging (₦)</label>
-                  <input
-                    type="number"
-                    value={newProd.packagingCost}
-                    onChange={(e) => setNewProd({ ...newProd, packagingCost: Number(e.target.value) })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-1.5 focus:bg-white focus:border-pink-500 outline-none"
-                  />
+                  <span className="text-slate-500 text-[10px] block">Unit Net Profit</span>
+                  <span className="font-bold text-emerald-600 text-sm">
+                    {formatNaira(Math.max(0, (Number(newProd.sellingPrice) || 0) - (Number(newProd.unitLandedCost) || 0)))}
+                  </span>
                 </div>
-                <div>
-                  <label className="font-semibold text-slate-500 block mb-1 text-[11px]">Gifts (₦)</label>
-                  <input
-                    type="number"
-                    value={newProd.giftCost}
-                    onChange={(e) => setNewProd({ ...newProd, giftCost: Number(e.target.value) })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-1.5 focus:bg-white focus:border-pink-500 outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="font-semibold text-slate-500 block mb-1 text-[11px]">Misc (₦)</label>
-                  <input
-                    type="number"
-                    value={newProd.miscCost}
-                    onChange={(e) => setNewProd({ ...newProd, miscCost: Number(e.target.value) })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-1.5 focus:bg-white focus:border-pink-500 outline-none"
-                  />
+                <div className="text-right">
+                  <span className="text-slate-500 text-[10px] block">Gross Margin</span>
+                  <span className="font-bold text-pink-600 text-sm">
+                    {Number(newProd.sellingPrice) > 0
+                      ? (((Number(newProd.sellingPrice) - Number(newProd.unitLandedCost)) / Number(newProd.sellingPrice)) * 100).toFixed(1)
+                      : '0.0'}%
+                  </span>
                 </div>
               </div>
 
@@ -1021,9 +1260,11 @@ export const Modals: React.FC<ModalsProps> = ({
                       }}
                       className="w-3/4 bg-white border border-slate-200 rounded-lg p-1.5 cursor-pointer outline-none text-slate-800"
                     >
-                      {products.map(p => (
-                        <option key={p.id} value={p.id}>{p.name} ({formatNaira(p.sellingPrice)})</option>
-                      ))}
+                      {products
+                        .filter(p => !p.isArchived || p.id === it.productId)
+                        .map(p => (
+                          <option key={p.id} value={p.id}>{p.name}{p.isArchived ? ' (Archived)' : ''} ({formatNaira(p.sellingPrice)})</option>
+                        ))}
                     </select>
 
                     <input
